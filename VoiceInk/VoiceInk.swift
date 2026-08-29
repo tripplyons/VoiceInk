@@ -22,7 +22,6 @@ struct VoiceInkApp: App {
     @StateObject private var mainWindowNavigation = MainWindowNavigation.shared
     @StateObject private var aiService = AIService()
     @StateObject private var enhancementService: AIEnhancementService
-    @StateObject private var licenseViewModel = LicenseViewModel.shared
     @StateObject private var activeWindowService = ActiveWindowService.shared
     @AppStorage("hasCompletedOnboardingV2") private var hasCompletedOnboardingV2 = false
     @AppStorage("enableAnnouncements") private var enableAnnouncements = true
@@ -353,13 +352,6 @@ struct VoiceInkApp: App {
                                 WindowManager.shared.configureWindow(window)
                             })
                 }
-            }
-            .confettiCelebrationPresenter()
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                licenseViewModel.refreshLicenseState()
-            }
-            .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)) { _ in
-                licenseViewModel.refreshLicenseState()
             }
         }
         .windowStyle(.hiddenTitleBar)

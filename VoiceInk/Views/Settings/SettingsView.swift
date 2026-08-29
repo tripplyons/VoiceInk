@@ -273,6 +273,18 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Help") {
+                Link("Documentation", destination: URL(string: "https://tryvoiceink.com/docs")!)
+                Link("Videos & Guides", destination: URL(string: "https://www.youtube.com/@tryvoiceink/videos")!)
+                Link("Changelog", destination: URL(string: "https://github.com/Beingpax/VoiceInk/releases")!)
+
+                Button("Email Support") {
+                    EmailSupport.openSupportEmail()
+                }
+
+                Link("Join Discord", destination: URL(string: "https://discord.gg/xryDy57nYD")!)
+            }
+
             Section {
                 LabeledContent("Export Settings") {
                     Button("Export") {
