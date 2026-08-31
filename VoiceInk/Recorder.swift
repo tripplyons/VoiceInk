@@ -13,6 +13,8 @@ class Recorder: NSObject, ObservableObject {
     private var isReconfiguring = false
     private let mediaController = MediaController.shared
     private let playbackController = PlaybackController.shared
+    private var activeRecordingURL: URL?
+    private var recordingGeneration: UInt64 = 0
     /// Dedicated serial queue for hardware setup.
     private let audioSetupQueue = DispatchQueue(label: "com.prakashjoshipax.voiceink.audioSetup", qos: .userInitiated)
     private let recordingAudioActionDelayNanoseconds: UInt64 = 220_000_000
@@ -113,6 +115,9 @@ class Recorder: NSObject, ObservableObject {
     }
 
     func startRecording(toOutputFile url: URL) async throws {
+        recordingGeneration &+= 1
+        let startGeneration = recordingGeneration
+        activeRecordingURL = url
         deviceManager.isRecordingActive = true
 
         let currentDeviceID = deviceManager.getCurrentDevice()
@@ -151,8 +156,11 @@ class Recorder: NSObject, ObservableObject {
                 }
             }
 
+            guard recordingGeneration == startGeneration else { return }
             resetAudioMeter()
         } catch {
+            guard recordingGeneration == startGeneration else { return }
+            activeRecordingURL = nil
             logger.error(
                 "Failed to start recording deviceID=\(deviceID, privacy: .public) file=\(url.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
             )
@@ -166,8 +174,11 @@ class Recorder: NSObject, ObservableObject {
         audioMuteTask = nil
         mediaPauseTask?.cancel()
         mediaPauseTask = nil
-        // Capture current recorder to stop it on the serial hardware queue.
+        // Capture the active recording before yielding so a new recording cannot replace its URL.
         let currentRecorder = self.recorder
+        let recordingURL = activeRecordingURL
+        let stopGeneration = recordingGeneration
+        activeRecordingURL = nil
 
         await withCheckedContinuation { continuation in
             audioSetupQueue.async {
@@ -175,7 +186,23 @@ class Recorder: NSObject, ObservableObject {
                 continuation.resume()
             }
         }
-        onAudioChunk = nil
+        if recordingGeneration == stopGeneration {
+            onAudioChunk = nil
+        }
+
+        if let recordingURL, FileManager.default.fileExists(atPath: recordingURL.path) {
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try AudioProcessor().normalizeAudioFile(at: recordingURL)
+                }.value
+            } catch {
+                logger.error(
+                    "Failed to peak-normalize recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
+                )
+            }
+        }
+
+        guard recordingGeneration == stopGeneration else { return }
 
         resetAudioMeter()
 

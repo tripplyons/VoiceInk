@@ -35,8 +35,9 @@ class AudioProcessor {
     }
 
     func processAudioToSamples(_ url: URL) async throws -> [Float] {
+        let samples: [Float]
         do {
-            return try readUsingAudioFile(url)
+            samples = try readUsingAudioFile(url)
         } catch {
             // AVAudioFile can choke on some container/codec combinations that
             // the media stack can otherwise play (e.g. avfaudio error -50 on
@@ -46,7 +47,74 @@ class AudioProcessor {
             logger.warning(
                 "AVAudioFile pipeline failed for \(url.lastPathComponent, privacy: .public): \(error, privacy: .public). Falling back to AVAssetReader."
             )
-            return try await readUsingAssetReader(url)
+            samples = try await readUsingAssetReader(url)
+        }
+
+        return peakNormalized(samples)
+    }
+
+    func normalizeAudioFile(at url: URL) throws {
+        let peak = try peakAmplitude(in: url)
+        guard peak > 0 else { return }
+
+        let temporaryURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(url.lastPathComponent).normalizing-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+        try writePeakNormalizedAudio(from: url, to: temporaryURL, gain: 1 / peak)
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
+    }
+
+    private func peakAmplitude(in url: URL) throws -> Float {
+        let audioFile = try AVAudioFile(forReading: url)
+        let format = audioFile.processingFormat
+        let chunkSize: AVAudioFrameCount = 65_536
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
+            throw AudioProcessingError.sampleExtractionFailed
+        }
+
+        var peak: Float = 0
+        while audioFile.framePosition < audioFile.length {
+            try audioFile.read(into: buffer, frameCount: chunkSize)
+            guard buffer.frameLength > 0 else { break }
+            guard let channels = buffer.floatChannelData else {
+                throw AudioProcessingError.sampleExtractionFailed
+            }
+
+            for channel in 0..<Int(format.channelCount) {
+                let samples = UnsafeBufferPointer(start: channels[channel], count: Int(buffer.frameLength))
+                peak = max(peak, samples.lazy.map(abs).max() ?? 0)
+            }
+        }
+        return peak
+    }
+
+    private func writePeakNormalizedAudio(from sourceURL: URL, to destinationURL: URL, gain: Float) throws {
+        let sourceFile = try AVAudioFile(forReading: sourceURL)
+        let format = sourceFile.processingFormat
+        let outputFile = try AVAudioFile(
+            forWriting: destinationURL,
+            settings: sourceFile.fileFormat.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        let chunkSize: AVAudioFrameCount = 65_536
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
+            throw AudioProcessingError.conversionFailed
+        }
+
+        while sourceFile.framePosition < sourceFile.length {
+            try sourceFile.read(into: buffer, frameCount: chunkSize)
+            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
+                throw AudioProcessingError.sampleExtractionFailed
+            }
+
+            for channel in 0..<Int(format.channelCount) {
+                for frame in 0..<Int(buffer.frameLength) {
+                    channels[channel][frame] *= gain
+                }
+            }
+            try outputFile.write(from: buffer)
         }
     }
 
@@ -112,7 +180,7 @@ class AudioProcessor {
                     }
                 )
 
-                if let error = error {
+                if error != nil {
                     throw AudioProcessingError.conversionFailed
                 }
 
@@ -199,12 +267,6 @@ class AudioProcessor {
             throw AudioProcessingError.sampleExtractionFailed
         }
 
-        // Keep the fallback output in the same normalized Float range expected
-        // by the WAV export path.
-        let maxSample = samples.map(abs).max() ?? 1
-        if maxSample > 0 {
-            samples = samples.map { $0 / maxSample }
-        }
         return samples
     }
 
@@ -257,13 +319,15 @@ class AudioProcessor {
             }
         }
 
-        let maxSample = samples.map(abs).max() ?? 1
-        if maxSample > 0 {
-            samples = samples.map { $0 / maxSample }
-        }
-
         return samples
     }
+
+    private func peakNormalized(_ samples: [Float]) -> [Float] {
+        let maxSample = samples.lazy.map(abs).max() ?? 0
+        guard maxSample > 0 else { return samples }
+        return samples.map { $0 / maxSample }
+    }
+
     func saveSamplesAsWav(samples: [Float], to url: URL) throws {
         let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
