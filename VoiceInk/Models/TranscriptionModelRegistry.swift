@@ -74,6 +74,18 @@ enum TranscriptionModelRegistry {
                 supportedLanguages: LanguageDictionary.nemotronMultilingual
             ),
 
+            TranscribeCppModel(
+                name: "sensevoice-small",
+                displayName: "SenseVoice Small",
+                description: "Fast CJK and English transcription that runs privately on your Mac",
+                size: "241 MB",
+                speed: 0.99,
+                accuracy: 0.92,
+                ramUsage: 0.5,
+                publisher: "FunAudioLLM / Alibaba",
+                supportedLanguages: LanguageDictionary.senseVoiceSmall
+            ),
+
             // Local Models
             WhisperModel(
                 name: "ggml-tiny",

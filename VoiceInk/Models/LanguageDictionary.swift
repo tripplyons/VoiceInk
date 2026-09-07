@@ -88,6 +88,11 @@ enum LanguageDictionary {
         return filtered
     }
 
+    static let senseVoiceSmall = forCodes(
+        ["en", "ja", "ko", "yue", "zh"],
+        includesAutoDetect: true
+    )
+
     static let nemotronLatin: [String: String] = [
         "auto": "Auto-detect",
         "de-DE": "German",

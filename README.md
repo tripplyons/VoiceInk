@@ -48,6 +48,12 @@ open ~/Downloads/VoiceInk.app
 
 See [BUILDING.md](BUILDING.md) for requirements, manual build steps, and troubleshooting.
 
+### Try SenseVoice Small
+
+- Download SenseVoice Small from the local models list, then select it as your mode's transcription model.
+- The 241 MB model runs offline and supports English, Mandarin, Cantonese, Japanese, and Korean.
+- Transcription runs after recording stops, without live streaming. No API key is required.
+
 ## Requirements
 
 - macOS 14.4 or later
@@ -85,6 +91,7 @@ If you encounter any issues or have questions, please:
 ### Core Technology
 - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) - High-performance inference of OpenAI's Whisper model
 - [FluidAudio](https://github.com/FluidInference/FluidAudio) - Used for Parakeet model implementation
+- [Transcribe-cpp-swift](https://github.com/Beingpax/Transcribe-cpp-swift) - Local SenseVoice inference, backported with its download support from upstream commits `8931da5` through `fa28f3d`
 
 ### Essential Dependencies
 - [Sparkle](https://github.com/sparkle-project/Sparkle) - Keeping VoiceInk up to date
