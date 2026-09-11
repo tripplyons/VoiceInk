@@ -625,8 +625,6 @@ struct AudioPlayerView: View {
                     transcription.enhancementDuration = enhancementResult.duration
                     transcription.aiRequestSystemMessage = enhancementResult.systemMessage
                     transcription.aiRequestUserMessage = enhancementResult.userMessage
-                    try? modelContext.save()
-
                     isReEnhancing = false
                     showSuccessFeedback(.reEnhanceSuccess, title: String(localized: "Re-enhancement successful"))
                 }

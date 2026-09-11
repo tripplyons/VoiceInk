@@ -84,24 +84,7 @@ class AudioTranscriptionService: ObservableObject {
 
             let audioAsset = AVURLAsset(url: url)
             let duration = CMTimeGetSeconds(try await audioAsset.load(.duration))
-            let recordingsDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-                0
-            ]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk")
-            .appendingPathComponent("Recordings")
-
-            let fileName = "retranscribed_\(UUID().uuidString).wav"
-            let permanentURL = recordingsDirectory.appendingPathComponent(fileName)
-
-            do {
-                try FileManager.default.copyItem(at: url, to: permanentURL)
-            } catch {
-                logger.error("❌ Failed to create permanent copy of audio: \(error, privacy: .public)")
-                isTranscribing = false
-                throw error
-            }
-
-            let permanentURLString = permanentURL.absoluteString
+            let audioURLString = url.absoluteString
 
             let originalText = cleanedText
             let enhancementConfiguration =
@@ -131,7 +114,7 @@ class AudioTranscriptionService: ObservableObject {
                         text: originalText,
                         duration: duration,
                         enhancedText: enhancementResult.text,
-                        audioFileURL: permanentURLString,
+                        audioFileURL: audioURLString,
                         transcriptionModelName: model.displayName,
                         aiEnhancementModelName: enhancementConfiguration.modelName
                             ?? enhancementConfiguration.provider?.defaultModel,
@@ -143,14 +126,6 @@ class AudioTranscriptionService: ObservableObject {
                         modeName: modeName,
                         modeEmoji: modeEmoji
                     )
-                    modelContext.insert(newTranscription)
-                    do {
-                        try modelContext.save()
-                        NotificationCenter.default.post(name: .transcriptionCreated, object: newTranscription)
-                        NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
-                    } catch {
-                        logger.error("❌ Failed to save transcription: \(error, privacy: .public)")
-                    }
                     await MainActor.run {
                         isTranscribing = false
                     }
@@ -166,21 +141,13 @@ class AudioTranscriptionService: ObservableObject {
                         text: originalText,
                         duration: duration,
                         enhancedText: failureMessage,
-                        audioFileURL: permanentURLString,
+                        audioFileURL: audioURLString,
                         transcriptionModelName: model.displayName,
                         promptName: nil,
                         transcriptionDuration: transcriptionDuration,
                         modeName: modeName,
                         modeEmoji: modeEmoji
                     )
-                    modelContext.insert(newTranscription)
-                    do {
-                        try modelContext.save()
-                        NotificationCenter.default.post(name: .transcriptionCreated, object: newTranscription)
-                        NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
-                    } catch {
-                        logger.error("❌ Failed to save transcription: \(error, privacy: .public)")
-                    }
 
                     await MainActor.run {
                         isTranscribing = false
@@ -195,20 +162,13 @@ class AudioTranscriptionService: ObservableObject {
                 let newTranscription = Transcription(
                     text: originalText,
                     duration: duration,
-                    audioFileURL: permanentURLString,
+                    audioFileURL: audioURLString,
                     transcriptionModelName: model.displayName,
                     promptName: nil,
                     transcriptionDuration: transcriptionDuration,
                     modeName: modeName,
                     modeEmoji: modeEmoji
                 )
-                modelContext.insert(newTranscription)
-                do {
-                    try modelContext.save()
-                    NotificationCenter.default.post(name: .transcriptionCompleted, object: newTranscription)
-                } catch {
-                    logger.error("❌ Failed to save transcription: \(error, privacy: .public)")
-                }
 
                 await MainActor.run {
                     isTranscribing = false

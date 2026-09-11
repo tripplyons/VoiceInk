@@ -155,24 +155,17 @@ class AudioTranscriptionManager: ObservableObject {
             let audioAsset = AVURLAsset(url: item.url)
             let duration = CMTimeGetSeconds(try await audioAsset.load(.duration))
 
-            let recordingsDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[
-                0
-            ]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk")
-            .appendingPathComponent("Recordings")
-
-            let fileName = "transcribed_\(UUID().uuidString).wav"
-            let permanentURL = recordingsDirectory.appendingPathComponent(fileName)
-
-            try FileManager.default.createDirectory(at: recordingsDirectory, withIntermediateDirectories: true)
-            try audioProcessor.saveSamplesAsWav(samples: samples, to: permanentURL)
+            let temporaryURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("VoiceInk-\(UUID().uuidString).wav")
+            defer { try? FileManager.default.removeItem(at: temporaryURL) }
+            try audioProcessor.saveSamplesAsWav(samples: samples, to: temporaryURL)
             try Task.checkCancellation()
 
             // Phase: Transcribing
             item.status = .processing(phase: .transcribing)
             let transcriptionStart = Date()
             var text = try await serviceRegistry.transcribe(
-                audioURL: permanentURL,
+                audioURL: temporaryURL,
                 model: currentModel,
                 context: transcriptionConfiguration.requestContext
             )
@@ -220,7 +213,7 @@ class AudioTranscriptionManager: ObservableObject {
                         text: cleanedText,
                         duration: duration,
                         enhancedText: enhancementResult.text,
-                        audioFileURL: permanentURL.absoluteString,
+                        audioFileURL: nil,
                         transcriptionModelName: currentModel.displayName,
                         aiEnhancementModelName: enhancementConfiguration.modelName
                             ?? enhancementConfiguration.provider?.defaultModel,
@@ -238,7 +231,7 @@ class AudioTranscriptionManager: ObservableObject {
                         text: cleanedText,
                         duration: duration,
                         enhancedText: failureMessage,
-                        audioFileURL: permanentURL.absoluteString,
+                        audioFileURL: nil,
                         transcriptionModelName: currentModel.displayName,
                         promptName: nil,
                         transcriptionDuration: transcriptionDuration,
@@ -250,7 +243,7 @@ class AudioTranscriptionManager: ObservableObject {
                 transcription = Transcription(
                     text: cleanedText,
                     duration: duration,
-                    audioFileURL: permanentURL.absoluteString,
+                    audioFileURL: nil,
                     transcriptionModelName: currentModel.displayName,
                     promptName: nil,
                     transcriptionDuration: transcriptionDuration,
@@ -258,11 +251,6 @@ class AudioTranscriptionManager: ObservableObject {
                     modeEmoji: modeMetadata.emoji
                 )
             }
-
-            modelContext.insert(transcription)
-            try modelContext.save()
-            NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
-            NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
 
             item.transcription = transcription
             item.status = .completed

@@ -69,11 +69,7 @@ struct CustomModelBackup: Codable {
 struct GeneralBackup: Codable {
     let primaryRecordingShortcut: ShortcutBackup?
     let secondaryRecordingShortcut: ShortcutBackup?
-    let pasteLastTranscriptionShortcut: ShortcutBackup?
-    let pasteLastEnhancementShortcut: ShortcutBackup?
-    let retryLastTranscriptionShortcut: ShortcutBackup?
     let cancelRecorderShortcut: ShortcutBackup?
-    let openHistoryWindowShortcut: ShortcutBackup?
     let quickAddToDictionaryShortcut: ShortcutBackup?
     let primaryRecordingShortcutRawValue: String?
     let secondaryRecordingShortcutRawValue: String?
@@ -86,10 +82,6 @@ struct GeneralBackup: Codable {
     let recorderType: String?
     let appAppearancePreference: String?
     let appLanguagePreference: String?
-    let isTranscriptionCleanupEnabled: Bool?
-    let transcriptionRetentionMinutes: Int?
-    let isAudioCleanupEnabled: Bool?
-    let audioRetentionPeriod: Int?
 
     let isSystemMuteEnabled: Bool?
     let isPauseMediaEnabled: Bool?

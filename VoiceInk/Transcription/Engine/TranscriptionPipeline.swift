@@ -86,11 +86,6 @@ class TranscriptionPipeline {
                 modelName: transcription.transcriptionModelName ?? model.displayName
             )
 
-            do {
-                try modelContext.save()
-            } catch {
-                logger.error("Failed to save canceled transcription: \(error, privacy: .public)")
-            }
         }
 
         if shouldCancel() {
@@ -240,32 +235,6 @@ class TranscriptionPipeline {
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
         }
 
-        func saveTranscriptionAndPostCompletion() {
-            var didInsertSessionMetric = false
-
-            if transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue {
-                do {
-                    didInsertSessionMetric = try SessionMetricRecorder.recordRecorderSession(
-                        transcription: transcription,
-                        model: model,
-                        in: modelContext
-                    )
-                } catch {
-                    logger.error("Failed to record session metric: \(error, privacy: .public)")
-                }
-            }
-
-            do {
-                try modelContext.save()
-                if didInsertSessionMetric {
-                    NotificationCenter.default.post(name: .sessionMetricsDidChange, object: nil)
-                }
-                NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
-            } catch {
-                logger.error("Failed to save transcription: \(error, privacy: .public)")
-            }
-        }
-
         if shouldCancel() {
             await finishCanceledTranscription()
             return
@@ -289,7 +258,6 @@ class TranscriptionPipeline {
             )
         )
 
-        saveTranscriptionAndPostCompletion()
     }
 
     private func metadata(for mode: ModeConfig?) -> (name: String?, emoji: String?) {

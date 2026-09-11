@@ -270,22 +270,6 @@ class RecordingShortcutManager: ObservableObject {
 
     private func handleGlobalShortcut(_ action: ShortcutAction) async {
         switch action {
-        case .pasteLastTranscription:
-            LastTranscriptionService.pasteLastTranscription(from: engine.modelContext)
-        case .pasteLastEnhancement:
-            LastTranscriptionService.pasteLastEnhancement(from: engine.modelContext)
-        case .retryLastTranscription:
-            LastTranscriptionService.retryLastTranscription(
-                from: engine.modelContext,
-                transcriptionModelManager: engine.transcriptionModelManager,
-                serviceRegistry: engine.serviceRegistry,
-                enhancementService: engine.enhancementService
-            )
-        case .openHistoryWindow:
-            HistoryWindowController.shared.showHistoryWindow(
-                modelContainer: engine.modelContext.container,
-                engine: engine
-            )
         case .quickAddToDictionary:
             DictionaryQuickAddManager.shared.toggle(modelContainer: engine.modelContext.container)
         default:

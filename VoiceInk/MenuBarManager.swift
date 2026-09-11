@@ -1,5 +1,4 @@
 import AppKit
-import SwiftData
 import SwiftUI
 
 class MenuBarManager: ObservableObject {
@@ -10,8 +9,6 @@ class MenuBarManager: ObservableObject {
         }
     }
 
-    private var modelContainer: ModelContainer?
-    private var engine: VoiceInkEngine?
     private var configuredActivationPolicy: NSApplication.ActivationPolicy {
         isMenuBarOnly ? .accessory : .regular
     }
@@ -44,10 +41,6 @@ class MenuBarManager: ObservableObject {
         AppPresentationPolicy.restoreAccessoryIfNeededAfterUserFacingWindowClosed()
     }
 
-    func configure(modelContainer: ModelContainer, engine: VoiceInkEngine) {
-        self.modelContainer = modelContainer
-        self.engine = engine
-    }
 
     func toggleMenuBarOnly() {
         isMenuBarOnly.toggle()
@@ -83,26 +76,4 @@ class MenuBarManager: ObservableObject {
         }
     }
 
-    func openHistoryWindow() {
-        guard let modelContainer = modelContainer,
-            let engine = engine
-        else {
-            return
-        }
-
-        let openWindow = { [weak self] in
-            self?.activateForPresentedWindow()
-
-            HistoryWindowController.shared.showHistoryWindow(
-                modelContainer: modelContainer,
-                engine: engine
-            )
-        }
-
-        if Thread.isMainThread {
-            openWindow()
-        } else {
-            DispatchQueue.main.async(execute: openWindow)
-        }
-    }
 }

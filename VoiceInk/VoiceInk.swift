@@ -2,7 +2,6 @@ import AppIntents
 import AppKit
 import FluidAudio
 import OSLog
-import Sparkle
 import SwiftData
 import SwiftUI
 
@@ -17,22 +16,14 @@ struct VoiceInkApp: App {
     @StateObject private var transcriptionModelManager: TranscriptionModelManager
     @StateObject private var recorderUIManager: RecorderUIManager
     @StateObject private var recordingShortcutManager: RecordingShortcutManager
-    @StateObject private var updaterViewModel: UpdaterViewModel
     @StateObject private var menuBarManager: MenuBarManager
     @StateObject private var mainWindowNavigation = MainWindowNavigation.shared
     @StateObject private var aiService = AIService()
     @StateObject private var enhancementService: AIEnhancementService
     @StateObject private var activeWindowService = ActiveWindowService.shared
     @AppStorage("hasCompletedOnboardingV2") private var hasCompletedOnboardingV2 = false
-    @AppStorage("enableAnnouncements") private var enableAnnouncements = true
     @State private var showMenuBarIcon = true
     @State private var didShowLaunchReminders = false
-
-    // Audio cleanup manager for automatic deletion of old audio files
-    private let audioCleanupManager = AudioCleanupManager.shared
-
-    // Transcription auto-cleanup service for zero data retention
-    private let transcriptionAutoCleanupService = TranscriptionAutoCleanupService.shared
 
     // Model prewarm service for optimizing model on wake from sleep
     @StateObject private var prewarmService: ModelPrewarmService
@@ -52,7 +43,6 @@ struct VoiceInkApp: App {
             Transcription.self,
             VocabularyWord.self,
             WordReplacement.self,
-            SessionMetric.self,
         ])
         let resolvedContainer: ModelContainer
 
@@ -95,9 +85,6 @@ struct VoiceInkApp: App {
         let aiService = AIService()
         _aiService = StateObject(wrappedValue: aiService)
         aiService.refreshOllamaAvailabilityInBackground()
-
-        let updaterViewModel = UpdaterViewModel()
-        _updaterViewModel = StateObject(wrappedValue: updaterViewModel)
 
         let enhancementService = AIEnhancementService(aiService: aiService, modelContext: resolvedContainer.mainContext)
         _enhancementService = StateObject(wrappedValue: enhancementService)
@@ -150,7 +137,6 @@ struct VoiceInkApp: App {
 
         let menuBarManager = MenuBarManager()
         _menuBarManager = StateObject(wrappedValue: menuBarManager)
-        menuBarManager.configure(modelContainer: resolvedContainer, engine: engine)
 
         let activeWindowService = ActiveWindowService.shared
         _activeWindowService = StateObject(wrappedValue: activeWindowService)
@@ -171,17 +157,6 @@ struct VoiceInkApp: App {
 
         AppShortcuts.updateAppShortcutParameters()
 
-        let statsMigrationTask = SessionMetricMigrationService.shared.runStatsMigrationIfNeeded(
-            modelContainer: resolvedContainer)
-        let mainContext = resolvedContainer.mainContext
-        Task { @MainActor in
-            await statsMigrationTask?.value
-            TranscriptionAutoCleanupService.shared.startMonitoring(modelContext: mainContext)
-
-            let tokenBackfillTask = SessionMetricMigrationService.shared.runEnhancementTokenBackfillIfNeeded(
-                modelContainer: resolvedContainer)
-            await tokenBackfillTask?.value
-        }
     }
 
     // MARK: - Container Creation Helpers
@@ -216,17 +191,11 @@ struct VoiceInkApp: App {
 
         try? FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
 
-        let defaultStoreURL = appSupportURL.appendingPathComponent("default.store")
+        removeLegacyHistoryFiles(from: appSupportURL)
         let dictionaryStoreURL = appSupportURL.appendingPathComponent("dictionary.store")
-        let statsStoreURL = appSupportURL.appendingPathComponent("stats.store")
 
         let transcriptSchema = Schema([Transcription.self])
-        let transcriptConfig = ModelConfiguration(
-            "default",
-            schema: transcriptSchema,
-            url: defaultStoreURL,
-            cloudKitDatabase: .none
-        )
+        let transcriptConfig = ModelConfiguration("transient", schema: transcriptSchema, isStoredInMemoryOnly: true)
 
         let dictionarySchema = Schema([VocabularyWord.self, WordReplacement.self])
         #if LOCAL_BUILD
@@ -242,21 +211,22 @@ struct VoiceInkApp: App {
             cloudKitDatabase: dictionaryCloudKit
         )
 
-        let statsSchema = Schema([SessionMetric.self])
-        let statsConfig = ModelConfiguration(
-            "stats",
-            schema: statsSchema,
-            url: statsStoreURL,
-            cloudKitDatabase: .none
-        )
-
         do {
-            return try ModelContainer(for: schema, configurations: transcriptConfig, dictionaryConfig, statsConfig)
+            return try ModelContainer(for: schema, configurations: transcriptConfig, dictionaryConfig)
         } catch {
             logger.error(
                 "❌ Failed to create persistent ModelContainer:\n\(Self.fullErrorDescription(error), privacy: .public)")
             throw error
         }
+    }
+
+    private static func removeLegacyHistoryFiles(from appSupportURL: URL) {
+        let fileManager = FileManager.default
+        let names = ["default.store", "default.store-shm", "default.store-wal", "stats.store", "stats.store-shm", "stats.store-wal"]
+        for name in names {
+            try? fileManager.removeItem(at: appSupportURL.appendingPathComponent(name))
+        }
+        try? fileManager.removeItem(at: appSupportURL.appendingPathComponent("Recordings", isDirectory: true))
     }
 
     private static func createInMemoryContainer(schema: Schema, logger: Logger) throws -> ModelContainer {
@@ -266,11 +236,8 @@ struct VoiceInkApp: App {
         let dictionarySchema = Schema([VocabularyWord.self, WordReplacement.self])
         let dictionaryConfig = ModelConfiguration("dictionary", schema: dictionarySchema, isStoredInMemoryOnly: true)
 
-        let statsSchema = Schema([SessionMetric.self])
-        let statsConfig = ModelConfiguration("stats", schema: statsSchema, isStoredInMemoryOnly: true)
-
         do {
-            return try ModelContainer(for: schema, configurations: transcriptConfig, dictionaryConfig, statsConfig)
+            return try ModelContainer(for: schema, configurations: transcriptConfig, dictionaryConfig)
         } catch {
             logger.error(
                 "❌ Failed to create in-memory ModelContainer:\n\(Self.fullErrorDescription(error), privacy: .public)")
@@ -289,31 +256,13 @@ struct VoiceInkApp: App {
                         .environmentObject(transcriptionModelManager)
                         .environmentObject(recorderUIManager)
                         .environmentObject(recordingShortcutManager)
-                        .environmentObject(updaterViewModel)
                         .environmentObject(menuBarManager)
                         .environmentObject(mainWindowNavigation)
                         .environmentObject(aiService)
                         .environmentObject(enhancementService)
                         .modelContainer(container)
                         .onAppear {
-                            if enableAnnouncements {
-                                AnnouncementsService.shared.start()
-                            }
-
                             showLaunchRemindersIfNeeded()
-
-                            GitHubStarPromptCoordinator.shared.scheduleIfNeeded(modelContainer: container)
-
-                            // Run due audio-only cleanup and schedule future checks when transcript cleanup is not managing retention.
-                            if !UserDefaults.standard.bool(forKey: CleanupSettingsKeys.isTranscriptionCleanupEnabled)
-                                && UserDefaults.standard.bool(forKey: CleanupSettingsKeys.isAudioCleanupEnabled)
-                            {
-                                Task {
-                                    await audioCleanupManager.runAutomaticCleanupIfNeeded(
-                                        modelContext: container.mainContext)
-                                }
-                                audioCleanupManager.startAutomaticCleanup(modelContext: container.mainContext)
-                            }
 
                             // Process any pending open-file request now that the main ContentView is ready.
                             if let pendingURL = appDelegate.pendingOpenFileURL {
@@ -333,11 +282,8 @@ struct VoiceInkApp: App {
                             }
                         )
                         .onDisappear {
-                            AnnouncementsService.shared.stop()
                             whisperModelManager.unloadModel()
 
-                            // Stop the automatic audio cleanup process
-                            audioCleanupManager.stopAutomaticCleanup()
                         }
                 } else {
                     OnboardingView(hasCompletedOnboardingV2: $hasCompletedOnboardingV2)
@@ -357,13 +303,7 @@ struct VoiceInkApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: AppWindowLayout.width, height: AppWindowLayout.minimumHeight)
         .windowResizability(.contentSize)
-        .commands {
-            CommandGroup(replacing: .newItem) {}
-
-            CommandGroup(after: .appInfo) {
-                CheckForUpdatesView(updaterViewModel: updaterViewModel)
-            }
-        }
+        .commands { CommandGroup(replacing: .newItem) {} }
 
         MenuBarExtra(isInserted: $showMenuBarIcon) {
             MenuBarView()
@@ -375,7 +315,6 @@ struct VoiceInkApp: App {
                 .environmentObject(recordingShortcutManager)
                 .environmentObject(menuBarManager)
                 .environmentObject(mainWindowNavigation)
-                .environmentObject(updaterViewModel)
                 .environmentObject(aiService)
                 .environmentObject(enhancementService)
         } label: {
@@ -452,44 +391,6 @@ private struct MainWindowRequestBridge: View {
                     WindowManager.shared.showMainWindow()
                 }
             }
-    }
-}
-
-class UpdaterViewModel: ObservableObject {
-    private let updaterController: SPUStandardUpdaterController
-
-    @Published var canCheckForUpdates = false
-    @Published var automaticallyChecksForUpdates = false
-
-    init() {
-        updaterController = SPUStandardUpdaterController(
-            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
-
-        automaticallyChecksForUpdates = updaterController.updater.automaticallyChecksForUpdates
-
-        updaterController.updater.publisher(for: \.canCheckForUpdates)
-            .assign(to: &$canCheckForUpdates)
-
-        updaterController.updater.publisher(for: \.automaticallyChecksForUpdates)
-            .assign(to: &$automaticallyChecksForUpdates)
-    }
-
-    func setAutomaticallyChecksForUpdates(_ value: Bool) {
-        updaterController.updater.automaticallyChecksForUpdates = value
-    }
-
-    func checkForUpdates() {
-        // This is for manual checks - will show UI
-        updaterController.checkForUpdates(nil)
-    }
-}
-
-struct CheckForUpdatesView: View {
-    @ObservedObject var updaterViewModel: UpdaterViewModel
-
-    var body: some View {
-        Button("Check for Updates…", action: updaterViewModel.checkForUpdates)
-            .disabled(!updaterViewModel.canCheckForUpdates)
     }
 }
 

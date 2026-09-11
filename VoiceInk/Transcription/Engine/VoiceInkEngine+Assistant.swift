@@ -12,8 +12,6 @@ extension VoiceInkEngine {
         }
 
         let modelName = assistantSession.modelName
-        let modeName = assistantSession.modeName
-        let modeEmoji = assistantSession.modeEmoji
         let promptName = assistantSession.promptName
         let systemPrompt = assistantSession.systemPrompt
         let userMessage = assistantSession.beginFollowUp(trimmed)
@@ -34,33 +32,13 @@ extension VoiceInkEngine {
 
             assistantSession.finishFollowUp(reply.text)
 
-            do {
-                if let transcription {
-                    assistantChat.applyAssistantTurn(
-                        transcription: transcription,
-                        response: reply,
-                        provider: provider,
-                        modelName: modelName,
-                        promptName: promptName
-                    )
-                } else {
-                    try assistantChat.saveTypedAssistantTurn(
-                        input: trimmed,
-                        response: reply,
-                        provider: provider,
-                        modelName: modelName,
-                        promptName: promptName,
-                        modeName: modeName,
-                        modeEmoji: modeEmoji
-                    )
-                }
-            } catch {
-                let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                NotificationManager.shared.showNotification(
-                    title: String(
-                        format: String(localized: "Assistant response was not saved: %@"),
-                        String(errorDescription.prefix(80))),
-                    type: .warning
+            if let transcription {
+                assistantChat.applyAssistantTurn(
+                    transcription: transcription,
+                    response: reply,
+                    provider: provider,
+                    modelName: modelName,
+                    promptName: promptName
                 )
             }
         } catch {

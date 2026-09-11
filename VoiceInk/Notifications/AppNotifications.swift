@@ -14,10 +14,6 @@ extension Notification.Name {
     static let modeConfigurationApplied = Notification.Name("modeConfigurationApplied")
     static let modeConfigurationsDidChange = Notification.Name("ModeConfigurationsDidChange")
     static let modeShortcutAvailabilityDidChange = Notification.Name("modeShortcutAvailabilityDidChange")
-    static let transcriptionCreated = Notification.Name("transcriptionCreated")
-    static let transcriptionCompleted = Notification.Name("transcriptionCompleted")
-    static let transcriptionDeleted = Notification.Name("transcriptionDeleted")
-    static let sessionMetricsDidChange = Notification.Name("sessionMetricsDidChange")
     static let openFileForTranscription = Notification.Name("openFileForTranscription")
     static let audioDeviceSwitchRequired = Notification.Name("audioDeviceSwitchRequired")
 }

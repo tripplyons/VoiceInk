@@ -143,9 +143,8 @@ class VoiceInkEngine: NSObject, ObservableObject {
             self.assistantChat = nil
         }
 
-        let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("com.prakashjoshipax.VoiceInk")
-        self.recordingsDirectory = appSupportDirectory.appendingPathComponent("Recordings")
+        self.recordingsDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VoiceInkRecordings", isDirectory: true)
 
         self.serviceRegistry = TranscriptionServiceRegistry(
             modelProvider: whisperModelManager,
@@ -201,10 +200,6 @@ class VoiceInkEngine: NSObject, ObservableObject {
                         duration: 0,
                         transcriptionStatus: .pending
                     )
-                    modelContext.insert(transcription)
-                    try? modelContext.save()
-                    NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
-
                     await runPipeline(
                         on: transcription,
                         audioURL: recordedFile,
@@ -524,7 +519,6 @@ class VoiceInkEngine: NSObject, ObservableObject {
         else {
             transcription.text = String(localized: "Transcription Failed: No model selected")
             transcription.transcriptionStatus = TranscriptionStatus.failed.rawValue
-            try? modelContext.save()
             recordingState = .idle
             activePipelineUseCase = .newSession
             return
@@ -706,26 +700,8 @@ class VoiceInkEngine: NSObject, ObservableObject {
     }
 
     private func saveCanceledRecording() async {
-        guard let recordedFile,
-            FileManager.default.fileExists(atPath: recordedFile.path)
-        else { return }
-
-        let duration = await AudioFileMetadata.duration(for: recordedFile)
-        let transcription = makeRecordingTranscription(
-            for: recordedFile,
-            text: Transcription.canceledTranscriptionText,
-            duration: duration,
-            transcriptionStatus: .canceled
-        )
-
-        modelContext.insert(transcription)
-
-        do {
-            try modelContext.save()
-            NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
-        } catch {
-            logger.error("Failed to save canceled recording: \(error, privacy: .public)")
-        }
+        guard let recordedFile else { return }
+        try? FileManager.default.removeItem(at: recordedFile)
     }
 
     private func makeRecordingTranscription(

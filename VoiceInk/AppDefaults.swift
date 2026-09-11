@@ -1,13 +1,5 @@
 import Foundation
 
-enum CleanupSettingsKeys {
-    static let isTranscriptionCleanupEnabled = "IsTranscriptionCleanupEnabled"
-    static let transcriptionRetentionMinutes = "TranscriptionRetentionMinutes"
-    static let isAudioCleanupEnabled = "IsAudioCleanupEnabled"
-    static let audioRetentionPeriod = "AudioRetentionPeriod"
-    static let lastAutomaticAudioCleanupDate = "AudioCleanupLastAutomaticCleanupDate"
-}
-
 enum RecorderDisplaySettingsKeys {
     static let showLiveTranscript = "ShowLiveTranscript"
 }
@@ -18,7 +10,6 @@ enum AppDefaults {
             // Onboarding & General
             "hasCompletedOnboardingV2": false,
             "hasPreparedOnboardingV2": false,
-            "enableAnnouncements": true,
 
             // Clipboard
             "restoreClipboardAfterPaste": true,
@@ -42,11 +33,6 @@ enum AppDefaults {
             "RecorderType": "mini",
             RecorderDisplaySettingsKeys.showLiveTranscript: true,
 
-            // Cleanup
-            CleanupSettingsKeys.isTranscriptionCleanupEnabled: false,
-            CleanupSettingsKeys.transcriptionRetentionMinutes: 1440,
-            CleanupSettingsKeys.isAudioCleanupEnabled: false,
-            CleanupSettingsKeys.audioRetentionPeriod: 7,
 
             // UI & Behavior
             "IsMenuBarOnly": false,

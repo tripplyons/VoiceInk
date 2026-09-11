@@ -11,7 +11,6 @@ final class AssistantChatService {
         let requestLog: String
     }
 
-    private let modelContext: ModelContext
     private let aiService: AIService
 
     private var requestTimeout: TimeInterval {
@@ -20,7 +19,6 @@ final class AssistantChatService {
     }
 
     init(modelContext: ModelContext, aiService: AIService) {
-        self.modelContext = modelContext
         self.aiService = aiService
     }
 
@@ -72,34 +70,6 @@ final class AssistantChatService {
         transcription.transcriptionStatus = TranscriptionStatus.completed.rawValue
     }
 
-    func saveTypedAssistantTurn(
-        input: String,
-        response: Reply,
-        provider: AIProvider,
-        modelName: String?,
-        promptName: String?,
-        modeName: String?,
-        modeEmoji: String?
-    ) throws {
-        let transcription = Transcription(
-            text: input,
-            duration: 0,
-            enhancedText: response.text,
-            aiEnhancementModelName: modelName ?? provider.defaultModel,
-            promptName: promptName,
-            enhancementDuration: response.duration,
-            aiRequestSystemMessage: response.systemPrompt,
-            aiRequestUserMessage: response.requestLog,
-            modeName: modeName,
-            modeEmoji: modeEmoji,
-            transcriptionStatus: .completed
-        )
-
-        modelContext.insert(transcription)
-        try modelContext.save()
-        NotificationCenter.default.post(name: .transcriptionCreated, object: transcription)
-        NotificationCenter.default.post(name: .transcriptionCompleted, object: transcription)
-    }
 
     private static func requestLog(from messages: [AssistantDisplayMessage]) -> String {
         messages.map { message in

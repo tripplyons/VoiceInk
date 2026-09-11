@@ -1,29 +1,40 @@
-import Charts
-import SwiftData
+import AppKit
 import SwiftUI
 
 struct DashboardView: View {
-    @Environment(\.modelContext) private var modelContext
-    @EnvironmentObject private var recordingShortcutManager: RecordingShortcutManager
-    @ObservedObject private var starPrompt = GitHubStarPromptCoordinator.shared
+    @EnvironmentObject private var navigation: MainWindowNavigation
+    @EnvironmentObject private var recorderUIManager: RecorderUIManager
 
     var body: some View {
-        DashboardContent(modelContext: modelContext)
-        .overlay(alignment: .bottomTrailing) {
-            if starPrompt.isVisible {
-                GitHubStarPromptCard(
-                    isBusy: starPrompt.isStarring,
-                    completionState: starPrompt.completionState,
-                    openFailed: starPrompt.openFailed,
-                    onStar: { starPrompt.star() },
-                    onLater: { starPrompt.later() }
-                )
-                // True corner anchor, sitting over Copy System Info rather than making room for it.
-                .padding(.trailing, 16)
-                .padding(.bottom, 16)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
+        VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("VoiceInk")
+                    .font(.system(size: 32, weight: .bold))
+                Text("Dictate into any app or transcribe an audio file.")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
             }
+
+            HStack(spacing: 12) {
+                Button("Toggle Recorder") {
+                    recorderUIManager.handleToggleRecorderPanelNotification()
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button("Transcribe Audio") {
+                    navigation.navigate(to: .transcribeAudio)
+                }
+                .buttonStyle(.bordered)
+            }
+
+            if !AXIsProcessTrusted() {
+                Label("Accessibility permission is required to paste dictated text.", systemImage: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+
+            Spacer()
         }
-        .animation(.easeOut(duration: 0.25), value: starPrompt.isVisible)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .padding(32)
     }
 }

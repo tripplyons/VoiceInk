@@ -257,16 +257,8 @@ enum ShortcutMigration {
             return ["toggleMiniRecorder"]
         case .secondaryRecording:
             return ["toggleMiniRecorder2"]
-        case .pasteLastTranscription:
-            return ["pasteLastTranscription"]
-        case .pasteLastEnhancement:
-            return ["pasteLastEnhancement"]
-        case .retryLastTranscription:
-            return ["retryLastTranscription"]
         case .cancelRecorder:
             return ["cancelRecorder"]
-        case .openHistoryWindow:
-            return ["openHistoryWindow"]
         case .quickAddToDictionary:
             return ["quickAddToDictionary"]
         case .mode(let id):

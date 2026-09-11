@@ -70,7 +70,6 @@ private extension ViewType {
         .dashboard,
         .modes,
         .transcribeAudio,
-        .history,
         .dictionary,
         .models,
         .audio,
@@ -91,7 +90,6 @@ private extension ViewType {
         switch self {
         case .dashboard: return "gauge.medium"
         case .transcribeAudio: return "waveform.path"
-        case .history: return "doc.text.fill"
         case .models: return "cpu"
         case .modes: return "sparkles.square.fill.on.square"
         case .audio: return "mic.fill"
@@ -112,8 +110,6 @@ private extension ViewType {
             return .init(background: AppTheme.Sidebar.fallback)
         case .dictionary:
             return .init(background: AppTheme.Sidebar.dictionary)
-        case .history:
-            return .init(background: AppTheme.Sidebar.audio)
         case .transcribeAudio:
             return .init(background: AppTheme.Sidebar.transcribeAudio)
         case .settings:

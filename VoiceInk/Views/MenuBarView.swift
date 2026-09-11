@@ -9,7 +9,6 @@ struct MenuBarView: View {
     @EnvironmentObject var recordingShortcutManager: RecordingShortcutManager
     @EnvironmentObject var menuBarManager: MenuBarManager
     @EnvironmentObject var mainWindowNavigation: MainWindowNavigation
-    @EnvironmentObject var updaterViewModel: UpdaterViewModel
     @EnvironmentObject var enhancementService: AIEnhancementService
     @EnvironmentObject var aiService: AIService
     @ObservedObject private var launchAtLoginManager = LaunchAtLoginManager.shared
@@ -110,24 +109,6 @@ struct MenuBarView: View {
 
             Divider()
 
-            Button("Retry Last Transcription") {
-                LastTranscriptionService.retryLastTranscription(
-                    from: engine.modelContext,
-                    transcriptionModelManager: transcriptionModelManager,
-                    serviceRegistry: engine.serviceRegistry,
-                    enhancementService: enhancementService
-                )
-            }
-
-            Button("Copy Last Transcription") {
-                LastTranscriptionService.copyLastTranscription(from: engine.modelContext)
-            }
-            .keyboardShortcut("c", modifiers: [.command, .shift])
-
-            Button("History") {
-                menuBarManager.openHistoryWindow()
-            }
-            .keyboardShortcut("h", modifiers: [.command, .shift])
 
             Button(menuBarManager.isMenuBarOnly ? "Show Dock Icon" : "Hide Dock Icon") {
                 let shouldShowMainWindow = menuBarManager.isMenuBarOnly
@@ -154,11 +135,6 @@ struct MenuBarView: View {
                 showMainWindowAndNavigate(to: "Settings")
             }
             .keyboardShortcut(",", modifiers: .command)
-
-            Button("Check for Updates") {
-                updaterViewModel.checkForUpdates()
-            }
-            .disabled(!updaterViewModel.canCheckForUpdates)
 
             Button("Quit VoiceInk") {
                 NSApplication.shared.terminate(nil)

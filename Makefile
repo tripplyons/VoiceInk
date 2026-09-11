@@ -4,7 +4,7 @@ WHISPER_CPP_DIR := $(DEPS_DIR)/whisper.cpp
 FRAMEWORK_PATH := $(WHISPER_CPP_DIR)/build-apple/whisper.xcframework
 LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 
-.PHONY: all clean whisper setup build local check healthcheck help dev run release release-setup
+.PHONY: all clean whisper setup build local check healthcheck help dev run release
 
 # Default target
 all: check build
@@ -95,17 +95,31 @@ run:
 		fi; \
 	fi
 
-# Build a signed, notarized DMG and matching local Sparkle Appcast.
-release: whisper
-	@if [ -n "$(NOTES)" ]; then \
-		./scripts/release.sh --notes "$(NOTES)" $(RELEASE_ARGS); \
+# Build a local Release app without update or distribution services.
+release: check setup
+	@echo "Building VoiceInk Release app..."
+	xcodebuild -project VoiceInk.xcodeproj -scheme VoiceInk -configuration Release \
+		-derivedDataPath "$(LOCAL_DERIVED_DATA)" \
+		-xcconfig LocalBuild.xcconfig \
+		-skipPackagePluginValidation \
+		-skipMacroValidation \
+		CODE_SIGN_IDENTITY="-" \
+		CODE_SIGNING_REQUIRED=NO \
+		CODE_SIGNING_ALLOWED=YES \
+		DEVELOPMENT_TEAM="" \
+		CODE_SIGN_ENTITLEMENTS="$(CURDIR)/VoiceInk/VoiceInk.local.entitlements" \
+		SWIFT_ACTIVE_COMPILATION_CONDITIONS='$$(inherited) LOCAL_BUILD' \
+		build
+	@APP_PATH="$(LOCAL_DERIVED_DATA)/Build/Products/Release/VoiceInk.app" && \
+	if [ -d "$$APP_PATH" ]; then \
+		rm -rf "$$HOME/Downloads/VoiceInk.app"; \
+		ditto "$$APP_PATH" "$$HOME/Downloads/VoiceInk.app"; \
+		xattr -cr "$$HOME/Downloads/VoiceInk.app"; \
+		echo "Release app saved to: $$HOME/Downloads/VoiceInk.app"; \
 	else \
-		./scripts/release.sh $(RELEASE_ARGS); \
+		echo "Error: Could not find built VoiceInk.app at $$APP_PATH"; \
+		exit 1; \
 	fi
-
-# Store Apple's notarization credentials securely in Keychain.
-release-setup:
-	@./scripts/setup-release-notarization.sh
 
 # Cleanup
 clean:
@@ -123,8 +137,7 @@ help:
 	@echo "  local              Build for local use (no Apple Developer certificate needed)"
 	@echo "  run                Launch the built VoiceInk app"
 	@echo "  dev                Build and run the app (for development)"
-	@echo "  release            Build DMG and Appcast using release-notes/<version>.html"
-	@echo "  release-setup      Store notarization credentials in Keychain"
+	@echo "  release            Build a local Release app in ~/Downloads"
 	@echo "  all                Run full build process (default)"
 	@echo "  clean              Remove build artifacts"
 	@echo "  help               Show this help message"
