@@ -64,6 +64,108 @@ struct VoiceInkTests {
         )
     }
 
+    @MainActor
+    @Test func microphoneEqualizerResetRestoresTunedDefaults() throws {
+        let suite = "MicrophoneEqualizerResetTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = MicrophoneEqualizerSettingsStore(defaults: defaults)
+        store.settings = MicrophoneEqualizerSettings(
+            isEnabled: true,
+            highPassFrequency: 200,
+            bandGains: Array(repeating: 8, count: MicrophoneEqualizerSettings.bandFrequencies.count),
+            lowPassFrequency: 4_000
+        )
+
+        store.reset()
+
+        #expect(store.settings.isEnabled)
+        #expect(store.settings.highPassFrequency == 90)
+        #expect(store.settings.bandGains == [-3.5, 1.5, 2.5, -1, -1.5, -2.5])
+        #expect(store.settings.lowPassFrequency == 6_600)
+    }
+
+    @MainActor
+    @Test func microphoneEqualizerSettingsPersist() throws {
+        let suite = "MicrophoneEqualizerTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = MicrophoneEqualizerSettingsStore(defaults: defaults)
+        store.settings = MicrophoneEqualizerSettings(
+            isEnabled: true,
+            highPassFrequency: 140,
+            bandGains: [-2, 1, 3, 4, -1, -3],
+            lowPassFrequency: 6_200
+        )
+
+        let restored = MicrophoneEqualizerSettingsStore(defaults: defaults).settings
+        #expect(restored == store.settings)
+    }
+
+    @Test func microphoneEqualizerHighPassAttenuatesLowFrequencies() {
+        let sampleRate = 16_000.0
+        let settings = MicrophoneEqualizerSettings(
+            isEnabled: true,
+            highPassFrequency: 200,
+            bandGains: Array(repeating: 0, count: MicrophoneEqualizerSettings.bandFrequencies.count),
+            lowPassFrequency: 7_800
+        )
+        var lowTone = sineWave(frequency: 30, sampleRate: sampleRate)
+        var voiceTone = sineWave(frequency: 1_000, sampleRate: sampleRate)
+        let originalLowRMS = rms(lowTone.dropFirst(8_000))
+        let originalVoiceRMS = rms(voiceTone.dropFirst(8_000))
+        var lowEqualizer = MicrophoneEqualizer(settings: settings, sampleRate: sampleRate, channelCount: 1)
+        var voiceEqualizer = MicrophoneEqualizer(settings: settings, sampleRate: sampleRate, channelCount: 1)
+
+        lowEqualizer.process(&lowTone)
+        voiceEqualizer.process(&voiceTone)
+
+        #expect(rms(lowTone.dropFirst(8_000)) < originalLowRMS * 0.05)
+        #expect(rms(voiceTone.dropFirst(8_000)) > originalVoiceRMS * 0.9)
+    }
+
+    @Test func microphoneEqualizerAppliesBandGain() {
+        let sampleRate = 16_000.0
+        let settings = MicrophoneEqualizerSettings(
+            isEnabled: true,
+            highPassFrequency: 40,
+            bandGains: [0, 0, 0, 12, 0, 0],
+            lowPassFrequency: 7_800
+        )
+        var tone = sineWave(frequency: 1_000, sampleRate: sampleRate, amplitude: 0.1)
+        let originalRMS = rms(tone.dropFirst(8_000))
+        var equalizer = MicrophoneEqualizer(settings: settings, sampleRate: sampleRate, channelCount: 1)
+
+        equalizer.process(&tone)
+
+        #expect(rms(tone.dropFirst(8_000)) > originalRMS * 3.5)
+    }
+
+    @Test func microphoneProcessingNormalizesEqualizedAudio() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let url = directory.appendingPathComponent("equalized.wav")
+        let samples = sineWave(frequency: 1_000, sampleRate: 16_000, amplitude: 0.05)
+        let settings = MicrophoneEqualizerSettings(
+            isEnabled: true,
+            highPassFrequency: 80,
+            bandGains: [0, 0, 0, 6, 0, 0],
+            lowPassFrequency: 7_500
+        )
+        let processor = AudioProcessor()
+        try processor.saveSamplesAsWav(samples: samples, to: url)
+
+        try processor.processMicrophoneRecording(at: url, settings: settings)
+
+        let peak = try peakAmplitude(in: url)
+        #expect(peak > 0.99 && peak <= 1.0)
+    }
+
     @Test func peakNormalizesQuietAudioFile() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -85,6 +187,27 @@ struct VoiceInkTests {
         #expect(peakBefore > 0.19 && peakBefore < 0.21)
         #expect(peakAfter > 0.99 && peakAfter <= 1.0)
         #expect(normalizedBackgroundSample > 0.24 && normalizedBackgroundSample < 0.26)
+    }
+
+    private func sineWave(
+        frequency: Double,
+        sampleRate: Double,
+        amplitude: Float = 1,
+        duration: Double = 1
+    ) -> [Float] {
+        (0..<Int(sampleRate * duration)).map { frame in
+            amplitude * Float(sin(2 * Double.pi * frequency * Double(frame) / sampleRate))
+        }
+    }
+
+    private func rms<S: Sequence>(_ samples: S) -> Float where S.Element == Float {
+        var sum: Float = 0
+        var count = 0
+        for sample in samples {
+            sum += sample * sample
+            count += 1
+        }
+        return count > 0 ? sqrt(sum / Float(count)) : 0
     }
 
     private func peakAmplitude(in url: URL) throws -> Float {

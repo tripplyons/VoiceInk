@@ -175,7 +175,8 @@ class ImportExportService {
             isExperimentalFeaturesEnabled: UserDefaults.standard.bool(forKey: "isExperimentalFeaturesEnabled"),
             restoreClipboardAfterPaste: UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste"),
             clipboardRestoreDelay: UserDefaults.standard.double(forKey: "clipboardRestoreDelay"),
-            spokenPhraseActions: SpokenPhraseActionStore.shared.actions
+            spokenPhraseActions: SpokenPhraseActionStore.shared.actions,
+            microphoneEqualizerSettings: MicrophoneEqualizerSettingsStore.shared.settings
         )
 
         let exportedSettings = BackupFile(

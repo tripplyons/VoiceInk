@@ -187,6 +187,9 @@ enum BackupImporter {
         if let spokenPhraseActions = general.spokenPhraseActions {
             SpokenPhraseActionStore.shared.replaceAll(with: spokenPhraseActions)
         }
+        if let equalizerSettings = general.microphoneEqualizerSettings {
+            MicrophoneEqualizerSettingsStore.shared.replace(with: equalizerSettings)
+        }
 
         print("Successfully imported general settings.")
     }

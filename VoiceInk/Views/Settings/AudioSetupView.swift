@@ -25,6 +25,14 @@ struct AudioSetupView: View {
             }
 
             Section {
+                MicrophoneEqualizerSettingsView()
+            } header: {
+                Text("Microphone EQ")
+            } footer: {
+                Text("Shapes recorded microphone audio before normalization and transcription. Live streaming audio is unchanged.")
+            }
+
+            Section {
                 CustomSoundSettingsView()
             } header: {
                 Text("Recording Sounds")

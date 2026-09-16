@@ -191,13 +191,17 @@ class Recorder: NSObject, ObservableObject {
         }
 
         if let recordingURL, FileManager.default.fileExists(atPath: recordingURL.path) {
+            let equalizerSettings = MicrophoneEqualizerSettingsStore.shared.settings
             do {
                 try await Task.detached(priority: .userInitiated) {
-                    try AudioProcessor().normalizeAudioFile(at: recordingURL)
+                    try AudioProcessor().processMicrophoneRecording(
+                        at: recordingURL,
+                        settings: equalizerSettings
+                    )
                 }.value
             } catch {
                 logger.error(
-                    "Failed to peak-normalize recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
+                    "Failed to process recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
                 )
             }
         }

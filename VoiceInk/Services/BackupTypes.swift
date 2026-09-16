@@ -91,6 +91,7 @@ struct GeneralBackup: Codable {
     let restoreClipboardAfterPaste: Bool?
     let clipboardRestoreDelay: Double?
     let spokenPhraseActions: [SpokenPhraseAction]?
+    let microphoneEqualizerSettings: MicrophoneEqualizerSettings?
 }
 
 struct WordBackup: Codable {
