@@ -287,6 +287,13 @@ class StreamingTranscriptionService {
                     "FluidAudioTranscriptionService required for FluidAudio streaming. Ensure it is passed to StreamingTranscriptionService."
                 )
             }
+            let vocabularyWords = CustomVocabularyService.shared.getCustomVocabularyWords(from: modelContext)
+            if !vocabularyWords.isEmpty {
+                return FluidAudioVocabularyStreamingProvider(
+                    fluidAudioService: fluidAudioService,
+                    vocabularyWords: vocabularyWords
+                )
+            }
             return FluidAudioStreamingProvider(fluidAudioService: fluidAudioService)
         }
         guard let cloudProvider = CloudProviderRegistry.provider(for: model.provider),

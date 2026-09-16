@@ -4,7 +4,7 @@ struct DictionarySettingsView: View {
     @State private var selectedSection: DictionarySection = .replacements
     @State private var isShowingSettings = false
     private let dictionaryInfoMessage: LocalizedStringKey =
-        "Word Replacements run after transcription. Vocabulary is used with AI enhancement to better understand names, technical terms, and unique spellings in your transcript."
+        "Word Replacements run after transcription. Vocabulary helps AI enhancement and supported speech models preserve names, technical terms, and unique spellings."
 
     enum DictionarySection: String, CaseIterable, Hashable {
         case replacements = "Word Replacements"
@@ -15,7 +15,7 @@ struct DictionarySettingsView: View {
             case .spellings:
                 return String(
                     localized:
-                        "Vocabulary is used only with AI enhancement to preserve important names, technical terms, and unique spellings in the final output."
+                        "Vocabulary helps AI enhancement and supported speech models, including FluidAudio Parakeet v2 and v3, preserve important names, technical terms, and unique spellings."
                 )
             case .replacements:
                 return String(

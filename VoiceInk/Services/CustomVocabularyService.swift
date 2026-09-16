@@ -8,23 +8,21 @@ class CustomVocabularyService {
     private init() {}
 
     func getCustomVocabulary(from context: ModelContext) -> String {
-        guard let customWords = getCustomVocabularyWords(from: context), !customWords.isEmpty else {
-            return ""
-        }
+        let words = getCustomVocabularyWords(from: context)
+        guard !words.isEmpty else { return "" }
 
-        let wordsText = customWords.joined(separator: ", ")
-        return "Important Vocabulary: \(wordsText)"
+        return "Important Vocabulary: \(words.joined(separator: ", "))"
     }
 
-    private func getCustomVocabularyWords(from context: ModelContext) -> [String]? {
+    func getCustomVocabularyWords(from context: ModelContext) -> [String] {
         let descriptor = FetchDescriptor<VocabularyWord>(sortBy: [SortDescriptor(\VocabularyWord.word)])
+        guard let items = try? context.fetch(descriptor) else { return [] }
 
-        do {
-            let items = try context.fetch(descriptor)
-            let words = items.map { $0.word }
-            return words.isEmpty ? nil : words
-        } catch {
-            return nil
+        var seen = Set<String>()
+        return items.compactMap { item in
+            let word = item.word.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !word.isEmpty, seen.insert(word.lowercased()).inserted else { return nil }
+            return word
         }
     }
 }

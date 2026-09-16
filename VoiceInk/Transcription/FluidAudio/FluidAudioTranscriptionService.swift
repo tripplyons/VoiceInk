@@ -1,5 +1,6 @@
 import FluidAudio
 import Foundation
+import SwiftData
 import os.log
 
 class FluidAudioTranscriptionService: TranscriptionService {
@@ -11,7 +12,12 @@ class FluidAudioTranscriptionService: TranscriptionService {
     private var cachedModels: AsrModels?
     private var loadingTask: (version: AsrModelVersion, task: Task<AsrModels, Error>)?
     private let audioConverter = AudioConverter()
+    private let modelContext: ModelContext
     private let logger = Logger(subsystem: "com.prakashjoshipax.voiceink", category: "FluidAudioTranscriptionService")
+
+    init(modelContext: ModelContext) {
+        self.modelContext = modelContext
+    }
 
     private func version(for model: any TranscriptionModel) -> AsrModelVersion {
         FluidAudioModelManager.asrVersion(for: model.name)
@@ -176,16 +182,37 @@ class FluidAudioTranscriptionService: TranscriptionService {
         }
 
         let targetVersion = version(for: model)
-        try await ensureModelsLoaded(for: targetVersion)
+        let vocabularyWords = CustomVocabularyService.shared.getCustomVocabularyWords(from: modelContext)
+        if let vocabulary = try await FluidAudioVocabulary.load(words: vocabularyWords) {
+            let models = try await getOrLoadModels(for: targetVersion)
+            let languageHint = Self.languageHint(from: context.language, model: model)
+            let manager = SlidingWindowAsrManager(config: .default.applying(language: languageHint))
+            do {
+                try await manager.loadModels(models)
+                try await manager.configureVocabularyBoosting(
+                    vocabulary: vocabulary.context,
+                    ctcModels: vocabulary.ctcModels
+                )
+                try await manager.startStreaming(source: .system)
 
-        guard let asrManager = asrManager else {
-            throw ASRError.notInitialized
+                let samples = try loadAudioSamples(from: audioURL)
+                guard let buffer = PCMAudioConverter.pcmBuffer(fromFloat32Samples: samples) else {
+                    throw ASRError.processingFailed("Could not create an audio buffer")
+                }
+                await manager.streamAudio(buffer)
+                let text = try await manager.finish()
+                await manager.cleanup()
+                return TextNormalizer.shared.normalizeSentence(text)
+            } catch {
+                await manager.cleanup()
+                throw error
+            }
         }
 
-        let languageHint = Self.languageHint(
-            from: context.language,
-            model: model
-        )
+        try await ensureModelsLoaded(for: targetVersion)
+        guard let asrManager else { throw ASRError.notInitialized }
+
+        let languageHint = Self.languageHint(from: context.language, model: model)
         var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
         let result = try await asrManager.transcribe(
             audioURL,
