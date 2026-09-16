@@ -27,7 +27,7 @@ enum RecorderPanelStyle: String, CaseIterable, Identifiable {
 protocol RecorderPanelPresenting: AnyObject {
     var isRecorderPanelVisible: Bool { get }
     func dismissRecorderPanel() async
-    func startNewDictation() async
+    func startNewDictation(continuousSessionID: UUID?) async
 }
 
 @MainActor
@@ -197,12 +197,12 @@ class RecorderUIManager: ObservableObject, RecorderPanelPresenting {
         engine.assistantSession.reset()
     }
 
-    func startNewDictation() async {
+    func startNewDictation(continuousSessionID: UUID? = nil) async {
         guard let engine, engine.recordingState == .idle else { return }
 
         SoundManager.shared.playStartSound()
         isRecorderPanelVisible = true
-        await engine.toggleRecord()
+        await engine.toggleRecord(continuousSessionID: continuousSessionID)
     }
 
     func resetOnLaunch() async {
@@ -217,7 +217,12 @@ class RecorderUIManager: ObservableObject, RecorderPanelPresenting {
     func cancelRecording() async {
         guard let engine = engine else { return }
         await engine.cancelRecording()
-        await dismissRecorderPanel()
+
+        if engine.isContinuousModeEnabled {
+            await startNewDictation(continuousSessionID: engine.continuousModeSessionID)
+        } else {
+            await dismissRecorderPanel()
+        }
     }
 
     // MARK: - Notification Handling

@@ -19,10 +19,16 @@ struct MiniRecorderView<S: RecorderStateProvider & ObservableObject>: View {
     private let expandedCornerRadius: CGFloat = 14
 
     // true when live transcript is streaming in during recording
+    private var displayedTranscript: String {
+        stateProvider.isContinuousModeEnabled
+            ? stateProvider.continuousTranscriptText
+            : stateProvider.partialTranscript
+    }
+
     private var hasLiveTranscript: Bool {
         showLiveTranscript
-            && stateProvider.recordingState == .recording
-            && !stateProvider.partialTranscript.isEmpty
+            && !displayedTranscript.isEmpty
+            && (stateProvider.isContinuousModeEnabled || stateProvider.recordingState == .recording)
     }
 
     private var hasAssistantResponse: Bool {
@@ -73,7 +79,11 @@ struct MiniRecorderView<S: RecorderStateProvider & ObservableObject>: View {
     private var transcriptSection: some View {
         VStack(spacing: 0) {
             if hasLiveTranscript {
-                LiveTranscriptView(text: stateProvider.partialTranscript)
+                if stateProvider.isContinuousModeEnabled {
+                    ContinuousTranscriptEditor(stateProvider: stateProvider)
+                } else {
+                    LiveTranscriptView(text: displayedTranscript)
+                }
                 Divider().background(Color.white.opacity(0.15))
             }
         }

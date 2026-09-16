@@ -80,6 +80,41 @@ final class TranscriptionDelivery {
         }
     }
 
+    /// Delivers the text accumulated by continuous mode without closing its recorder panel.
+    @discardableResult
+    func deliverStackText(_ text: String, output: OutputRuntimeConfiguration) async -> Bool {
+        let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedText.isEmpty else { return false }
+
+        switch output.outputMode {
+        case .paste:
+            let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
+            let pastedText = trimmedText + (appendSpace ? " " : "")
+            let pasteResult = await CursorPaster.pasteAtCursorAndWaitUntilPosted(pastedText)
+            guard pasteResult.didPostPasteCommand else { return false }
+
+            if output.autoSendKey.isEnabled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                CursorPaster.performAutoSend(output.autoSendKey)
+            }
+            return true
+
+        case .customCommand:
+            guard let command = output.customCommand?.trimmedCommand else {
+                notifyCustomCommandFailure(CustomCommandDeliveryError.commandNotConfigured)
+                return false
+            }
+            return await runCustomCommand(command: command, commandText: trimmedText)
+
+        case .respond:
+            NotificationManager.shared.showNotification(
+                title: String(localized: "Continuous stack submission is not supported for Respond output."),
+                type: .warning
+            )
+            return false
+        }
+    }
+
     private func deliverFollowUp(_ item: Request, actions: Actions) async {
         SoundManager.shared.playStopSound()
 
@@ -133,7 +168,7 @@ final class TranscriptionDelivery {
         }
     }
 
-    private func runCustomCommand(command: String, commandText: String) async {
+    private func runCustomCommand(command: String, commandText: String) async -> Bool {
         let startTime = Date()
         logger.notice("Custom command started")
 
@@ -162,8 +197,10 @@ final class TranscriptionDelivery {
                     "Custom command succeeded duration=\(Self.formattedDuration(duration), privacy: .public)s stdoutBytes=\(stdoutBytes, privacy: .public) stderrBytes=\(stderrBytes, privacy: .public)"
                 )
             }
+            return true
         } catch {
             notifyCustomCommandFailure(error, duration: Date().timeIntervalSince(startTime))
+            return false
         }
     }
 

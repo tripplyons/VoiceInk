@@ -3,12 +3,40 @@ import Combine
 import Foundation
 
 struct SpokenPhraseAction: Codable, Equatable, Identifiable {
+  enum Operation: String, Codable, CaseIterable {
+    case keyboardShortcut
+    case pushStack
+    case submitStack
+    case resetStack
+    case submitStackAndKeyboardShortcut
+
+    var displayName: String {
+      switch self {
+      case .keyboardShortcut:
+        return String(localized: "Run Keyboard Shortcut")
+      case .pushStack:
+        return String(localized: "Push Text to Stack")
+      case .submitStack:
+        return String(localized: "Submit Stack")
+      case .resetStack:
+        return String(localized: "Reset Stack")
+      case .submitStackAndKeyboardShortcut:
+        return String(localized: "Submit Stack + Keyboard Shortcut")
+      }
+    }
+
+    var usesKeyboardShortcut: Bool {
+      self == .keyboardShortcut || self == .submitStackAndKeyboardShortcut
+    }
+  }
+
   var id = UUID()
   var phrase: String
   var shortcut: Shortcut
   var isEnabled = true
   var endsDictationAutomatically = false
   var startsNewDictationAutomatically = false
+  var operation: Operation = .keyboardShortcut
 }
 
 extension SpokenPhraseAction {
@@ -19,6 +47,7 @@ extension SpokenPhraseAction {
     case isEnabled
     case endsDictationAutomatically
     case startsNewDictationAutomatically
+    case operation
   }
 
   init(from decoder: Decoder) throws {
@@ -30,6 +59,7 @@ extension SpokenPhraseAction {
     endsDictationAutomatically = try container.decode(Bool.self, forKey: .endsDictationAutomatically)
     startsNewDictationAutomatically =
       try container.decodeIfPresent(Bool.self, forKey: .startsNewDictationAutomatically) ?? false
+    operation = (try? container.decodeIfPresent(Operation.self, forKey: .operation)) ?? .keyboardShortcut
   }
 
   func encode(to encoder: Encoder) throws {
@@ -40,6 +70,7 @@ extension SpokenPhraseAction {
     try container.encode(isEnabled, forKey: .isEnabled)
     try container.encode(endsDictationAutomatically, forKey: .endsDictationAutomatically)
     try container.encode(startsNewDictationAutomatically, forKey: .startsNewDictationAutomatically)
+    try container.encode(operation, forKey: .operation)
   }
 }
 
@@ -60,27 +91,43 @@ enum SpokenPhraseMatcher {
   }
 
   static func suffixMatch(in text: String, actions: [SpokenPhraseAction]) -> SpokenPhraseMatch? {
-    let textWords = words(in: text)
-    guard !textWords.isEmpty else { return nil }
-
     for action in enabledActions(actions).filter(\.endsDictationAutomatically) {
-      let phraseWords = words(in: action.phrase)
-      guard !phraseWords.isEmpty, phraseWords.count <= textWords.count else { continue }
-      guard
-        zip(textWords.suffix(phraseWords.count), phraseWords).allSatisfy({ pair in
-          pair.0.value == pair.1.value
-        })
-      else {
+      guard let remainingText = suffixRemainingText(
+        in: text,
+        matching: action.phrase,
+        allowingExact: false
+      ) else {
         continue
       }
-
-      let start = textWords[textWords.count - phraseWords.count].range.lowerBound
-      let remaining = text[..<start].trimmingCharacters(
-        in: .whitespacesAndNewlines.union(.punctuationCharacters))
-      return SpokenPhraseMatch(action: action, remainingText: remaining)
+      return SpokenPhraseMatch(action: action, remainingText: remainingText)
     }
 
     return nil
+  }
+
+  /// Returns the text before a phrase at the end of a transcription.
+  /// Exact matches are optional because normal dictation requires some text before an action.
+  static func suffixRemainingText(
+    in text: String,
+    matching phrase: String,
+    allowingExact: Bool
+  ) -> String? {
+    let textWords = words(in: text)
+    let phraseWords = words(in: phrase)
+    guard !textWords.isEmpty,
+      !phraseWords.isEmpty,
+      phraseWords.count <= textWords.count,
+      allowingExact || phraseWords.count < textWords.count,
+      zip(textWords.suffix(phraseWords.count), phraseWords).allSatisfy({ pair in
+        pair.0.value == pair.1.value
+      })
+    else {
+      return nil
+    }
+
+    let start = textWords[textWords.count - phraseWords.count].range.lowerBound
+    return text[..<start].trimmingCharacters(
+      in: .whitespacesAndNewlines.union(.punctuationCharacters))
   }
 
   static func removingSuffix(for actionID: UUID, from text: String, actions: [SpokenPhraseAction])
@@ -175,10 +222,47 @@ final class SpokenPhraseActionStore: ObservableObject {
   }
 
   private func load() {
-    guard let data = defaults.data(forKey: Self.defaultsKey),
+    if let data = defaults.data(forKey: Self.defaultsKey),
       let decoded = try? JSONDecoder().decode([SpokenPhraseAction].self, from: data)
-    else { return }
-    actions = decoded
+    {
+      actions = decoded
+    }
+
+    migrateLegacySpokenSubmitIfNeeded()
+  }
+
+  private func migrateLegacySpokenSubmitIfNeeded() {
+    let migrationKey = "spokenSubmitMigratedToSpokenAction"
+    guard !defaults.bool(forKey: migrationKey),
+      defaults.bool(forKey: "spokenSubmitEnabled"),
+      let legacyPhrase = defaults.string(forKey: "spokenSubmitPhrase")
+    else {
+      return
+    }
+
+    let phrase = legacyPhrase.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !SpokenPhraseMatcher.normalized(phrase).isEmpty else { return }
+
+    let returnShortcut = Shortcut.key(keyCode: 36, modifierFlags: [])
+    if let index = actions.firstIndex(where: {
+      SpokenPhraseMatcher.normalized($0.phrase) == SpokenPhraseMatcher.normalized(phrase)
+    }) {
+      actions[index].shortcut = returnShortcut
+      actions[index].endsDictationAutomatically = true
+      actions[index].operation = .submitStackAndKeyboardShortcut
+    } else {
+      actions.append(
+        SpokenPhraseAction(
+          phrase: phrase,
+          shortcut: returnShortcut,
+          endsDictationAutomatically: true,
+          operation: .submitStackAndKeyboardShortcut
+        )
+      )
+    }
+
+    defaults.set(true, forKey: migrationKey)
+    save()
   }
 
   private func save() {

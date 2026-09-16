@@ -95,6 +95,9 @@ class VoiceInkEngine: NSObject, ObservableObject {
     @Published var recordingState: RecordingState = .idle
     @Published var shouldCancelRecording = false
     @Published var partialTranscript: String = ""
+    @Published private(set) var isContinuousModeEnabled = false
+    @Published private(set) var continuousStackText = ""
+    @Published private(set) var continuousStackCount = 0
     var currentSession: TranscriptionSession?
     private var currentSessionTranscriptionConfiguration: TranscriptionRuntimeConfiguration?
     private var activeRecordingStartID: UUID?
@@ -102,6 +105,10 @@ class VoiceInkEngine: NSObject, ObservableObject {
     private var canceledPipelineTranscriptionIDs = Set<UUID>()
     private var activeRecordingUseCase: RecordingUseCase = .newSession
     private var activePipelineUseCase: RecordingUseCase = .newSession
+    private var activeContinuousCommand: ContinuousVoiceCommand?
+    private(set) var continuousModeSessionID: UUID?
+    private var continuousStack = ContinuousTextStack()
+    private let continuousDelivery = TranscriptionDelivery()
     private var activeRecordingContextStore: RecordingContextSnapshotStore?
     private var activeRecordingContextTasks: [Task<Void, Never>] = []
     private var voiceInkRefinePreparationTask: Task<Void, Never>?
@@ -177,9 +184,147 @@ class VoiceInkEngine: NSObject, ObservableObject {
         return enhancementService
     }
 
+    // MARK: - Continuous Mode
+
+    func setContinuousModeEnabled(_ enabled: Bool) async {
+        guard enabled != isContinuousModeEnabled else { return }
+
+        if enabled {
+            guard recordingState == .idle else {
+                NotificationManager.shared.showNotification(
+                    title: String(localized: "Stop the current recording before enabling Continuous Mode."),
+                    type: .warning
+                )
+                return
+            }
+
+            guard await passesRecordingPreflight() else { return }
+
+            let modelResolution = ModeRuntimeResolver.transcriptionModelResolution(
+                transcriptionModelManager: transcriptionModelManager
+            )
+            guard case .available = modelResolution else {
+                let failure = recordingModelFailure(for: modelResolution)
+                await failRecordingPreflight(
+                    title: failure.title,
+                    actionLabel: failure.actionLabel,
+                    action: failure.action
+                )
+                return
+            }
+
+            resetContinuousStack()
+            activeContinuousCommand = nil
+            continuousModeSessionID = UUID()
+            isContinuousModeEnabled = true
+            if let continuousModeSessionID {
+                await recorderUIManager?.startNewDictation(continuousSessionID: continuousModeSessionID)
+            }
+            return
+        }
+
+        isContinuousModeEnabled = false
+        activeContinuousCommand = nil
+        continuousModeSessionID = nil
+        resetContinuousStack()
+
+        if recordingState == .idle {
+            await recorderUIManager?.dismissRecorderPanel()
+        } else {
+            await cancelRecording()
+            await recorderUIManager?.dismissRecorderPanel()
+        }
+    }
+
+    private func resetContinuousStack() {
+        continuousStack.reset()
+        continuousStackText = continuousStack.text
+        continuousStackCount = continuousStack.entries.count
+    }
+
+    private func appendToContinuousStack(_ text: String) {
+        continuousStack.push(text)
+        continuousStackText = continuousStack.text
+        continuousStackCount = continuousStack.entries.count
+    }
+
+    func replaceContinuousStack(with text: String) {
+        guard isContinuousModeEnabled else { return }
+        resetContinuousStack()
+        appendToContinuousStack(text)
+    }
+
+    private func handleContinuousSegment(
+        _ text: String,
+        command: ContinuousVoiceCommand?,
+        sessionID: UUID
+    ) async {
+        guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return }
+
+        switch command {
+        case .resetStack:
+            resetContinuousStack()
+        case .submitStack:
+            appendToContinuousStack(text)
+            _ = await submitContinuousStack(sessionID: sessionID)
+        case .submitStackAndRunShortcut(let shortcut):
+            appendToContinuousStack(text)
+            let didSubmit = await submitContinuousStack(sessionID: sessionID)
+            guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return }
+            if didSubmit {
+                _ = SpokenShortcutRunner.run(shortcut)
+            }
+        case .pushStack, .runShortcut, nil:
+            appendToContinuousStack(text)
+            if case .runShortcut(let shortcut) = command {
+                _ = SpokenShortcutRunner.run(shortcut)
+            }
+        }
+
+        SoundManager.shared.playStopSound()
+    }
+
+    @discardableResult
+    private func submitContinuousStack(sessionID: UUID) async -> Bool {
+        let text = continuousStack.text
+        guard !text.isEmpty else { return false }
+
+        resetContinuousStack()
+        let output = ModeRuntimeResolver.outputConfiguration()
+        guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return false }
+        let didSubmit = await continuousDelivery.deliverStackText(text, output: output)
+        guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return false }
+        if !didSubmit {
+            appendToContinuousStack(text)
+        }
+        return didSubmit
+    }
+
+    private func resolveContinuousCommand(in text: String) -> ContinuousVoiceCommandMatch? {
+        let actions = SpokenPhraseActionStore.shared.actions
+        if let activeContinuousCommand,
+            let match = ContinuousVoiceCommandMatcher.match(
+                in: text,
+                actions: actions
+            ),
+            match.command == activeContinuousCommand
+        {
+            return match
+        }
+
+        return ContinuousVoiceCommandMatcher.match(in: text, actions: actions)
+    }
+
     // MARK: - Toggle Record
 
-    func toggleRecord(modeId: UUID? = nil, isAssistantFollowUp: Bool = false) async {
+    func toggleRecord(
+        modeId: UUID? = nil,
+        isAssistantFollowUp: Bool = false,
+        continuousSessionID: UUID? = nil
+    ) async {
+        if let continuousSessionID {
+            guard isContinuousModeEnabled, self.continuousModeSessionID == continuousSessionID else { return }
+        }
         if recordingState == .starting {
             await cancelRecording()
             return
@@ -225,6 +370,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
             shouldCancelRecording = false
             partialTranscript = ""
             activeRecordingUseCase = recordingUseCase
+            activeContinuousCommand = nil
             spokenPhraseTriggerDetector.reset()
             clearActiveRecordingContext()
 
@@ -235,7 +381,17 @@ class VoiceInkEngine: NSObject, ObservableObject {
             requestRecordPermission { [self] granted in
                 if granted {
                     Task { @MainActor [self] in
+                        guard continuousSessionID == nil
+                            || (self.isContinuousModeEnabled && self.continuousModeSessionID == continuousSessionID)
+                        else {
+                            return
+                        }
                         guard await self.passesRecordingPreflight() else {
+                            return
+                        }
+                        guard continuousSessionID == nil
+                            || (self.isContinuousModeEnabled && self.continuousModeSessionID == continuousSessionID)
+                        else {
                             return
                         }
 
@@ -327,7 +483,11 @@ class VoiceInkEngine: NSObject, ObservableObject {
                                                 return
                                             }
                                             self.partialTranscript = partial
-                                            self.handleSpokenActionPreview(partial, startID: startID)
+                                            if self.isContinuousModeEnabled {
+                                                self.handleContinuousCommandPreview(partial, startID: startID)
+                                            } else {
+                                                self.handleSpokenActionPreview(partial, startID: startID)
+                                            }
                                         }
                                     }
                                 )
@@ -529,6 +689,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
 
         let session = currentSession
         let transcriptionID = transcription.id
+        let continuousSessionID = isContinuousModeEnabled ? self.continuousModeSessionID : nil
         activePipelineTranscriptionID = transcriptionID
 
         let shouldStartNewDictation = await pipeline.run(
@@ -544,6 +705,21 @@ class VoiceInkEngine: NSObject, ObservableObject {
             },
             spokenPhraseMatch: { [weak self] text in
                 self?.resolveSpokenPhrase(in: text)
+            },
+            continuous: continuousSessionID.map { sessionID in
+                TranscriptionPipeline.ContinuousHooks(
+                    matchCommand: { [weak self] text in
+                        self?.resolveContinuousCommand(in: text)
+                    },
+                    handleSegment: { [weak self] text, command in
+                        guard let self else { return }
+                        await self.handleContinuousSegment(
+                            text,
+                            command: command,
+                            sessionID: sessionID
+                        )
+                    }
+                )
             },
             enhancementConfiguration: { [weak self] in
                 guard let self,
@@ -611,8 +787,18 @@ class VoiceInkEngine: NSObject, ObservableObject {
         )
 
         let didFinishActivePipeline = activePipelineTranscriptionID == transcriptionID
+        let isCurrentContinuousPipeline =
+            didFinishActivePipeline
+            && isContinuousModeEnabled
+            && continuousModeSessionID == continuousSessionID
         if didFinishActivePipeline {
-            await cleanupResources()
+            if isCurrentContinuousPipeline {
+                activeRecordingStartID = nil
+                await finishRecorderSession(keepPreparedModelWarm: true)
+            } else {
+                await cleanupResources()
+            }
+            guard activePipelineTranscriptionID == transcriptionID else { return }
             activePipelineTranscriptionID = nil
             currentSession = nil
             currentSessionTranscriptionConfiguration = nil
@@ -630,8 +816,17 @@ class VoiceInkEngine: NSObject, ObservableObject {
             recordingState = .idle
         }
 
-        if didFinishActivePipeline && shouldStartNewDictation {
-            await recorderUIManager?.startNewDictation()
+        if didFinishActivePipeline
+            && (shouldStartNewDictation || (isCurrentContinuousPipeline && recordingState == .idle))
+        {
+            if let continuousSessionID {
+                guard isContinuousModeEnabled,
+                    continuousModeSessionID == continuousSessionID
+                else { return }
+                await recorderUIManager?.startNewDictation(continuousSessionID: continuousSessionID)
+            } else if shouldStartNewDictation {
+                await recorderUIManager?.startNewDictation(continuousSessionID: nil)
+            }
         }
     }
 
@@ -645,10 +840,10 @@ class VoiceInkEngine: NSObject, ObservableObject {
     }
 
     private func handleSpokenActionPreview(_ text: String, startID: UUID) {
-        guard spokenPhraseTriggerDetector.matchPreview(
-            text,
-            actions: SpokenPhraseActionStore.shared.actions
-        ) != nil else { return }
+        let normalActions = SpokenPhraseActionStore.shared.actions.filter {
+            $0.operation == .keyboardShortcut || $0.operation == .submitStackAndKeyboardShortcut
+        }
+        guard spokenPhraseTriggerDetector.matchPreview(text, actions: normalActions) != nil else { return }
         Task { @MainActor [weak self] in
             guard let self,
                 self.activeRecordingStartID == startID,
@@ -658,8 +853,26 @@ class VoiceInkEngine: NSObject, ObservableObject {
         }
     }
 
+    private func handleContinuousCommandPreview(_ text: String, startID: UUID) {
+        guard activeContinuousCommand == nil,
+            let match = resolveContinuousCommand(in: text)
+        else { return }
+
+        activeContinuousCommand = match.command
+        Task { @MainActor [weak self] in
+            guard let self,
+                self.activeRecordingStartID == startID,
+                self.recordingState == .recording,
+                self.isContinuousModeEnabled
+            else { return }
+            await self.toggleRecord()
+        }
+    }
+
     private func resolveSpokenPhrase(in text: String) -> SpokenPhraseMatch? {
-        let actions = SpokenPhraseActionStore.shared.actions
+        let actions = SpokenPhraseActionStore.shared.actions.filter {
+            $0.operation == .keyboardShortcut || $0.operation == .submitStackAndKeyboardShortcut
+        }
         if let triggeredActionID = spokenPhraseTriggerDetector.triggeredActionID,
             let match = SpokenPhraseMatcher.removingSuffix(
                 for: triggeredActionID,
@@ -677,6 +890,9 @@ class VoiceInkEngine: NSObject, ObservableObject {
     // MARK: - Cancellation
 
     func cancelRecording() async {
+        isContinuousModeEnabled = false
+        continuousModeSessionID = nil
+        activeContinuousCommand = nil
         let shouldFinishSessionImmediately: Bool
         switch recordingState {
         case .starting, .recording:
@@ -702,6 +918,10 @@ class VoiceInkEngine: NSObject, ObservableObject {
 
     func resetRecordingSession() async {
         cancelCurrentSession()
+        isContinuousModeEnabled = false
+        continuousModeSessionID = nil
+        activeContinuousCommand = nil
+        resetContinuousStack()
         activeRecordingStartID = nil
         activePipelineTranscriptionID = nil
         canceledPipelineTranscriptionIDs.removeAll()
@@ -849,17 +1069,19 @@ class VoiceInkEngine: NSObject, ObservableObject {
         currentSessionTranscriptionConfiguration = nil
     }
 
-    private func finishRecorderSession() async {
+    private func finishRecorderSession(keepPreparedModelWarm: Bool = false) async {
         let preparationTask = voiceInkRefinePreparationTask
         voiceInkRefinePreparationTask = nil
         preparationTask?.cancel()
         await preparationTask?.value
 
         enhancementService?.clearCapturedContexts()
-        await enhancementService?
-            .getAIService()?
-            .voiceInkRefineService
-            .unloadPreparedModelIfNeeded()
+        if !keepPreparedModelWarm {
+            await enhancementService?
+                .getAIService()?
+                .voiceInkRefineService
+                .unloadPreparedModelIfNeeded()
+        }
     }
 
     func cleanupResources() async {

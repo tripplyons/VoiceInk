@@ -4,6 +4,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.modelContext) private var modelContext
+    @EnvironmentObject private var engine: VoiceInkEngine
     @EnvironmentObject private var menuBarManager: MenuBarManager
     @EnvironmentObject private var recordingShortcutManager: RecordingShortcutManager
     @EnvironmentObject private var recorderUIManager: RecorderUIManager
@@ -123,6 +124,29 @@ struct SettingsView: View {
                                 .foregroundColor(.secondary)
                         }
                     }
+                }
+            }
+
+            Section("Continuous Mode") {
+                Toggle(
+                    "Continuous Mode",
+                    isOn: Binding(
+                        get: { engine.isContinuousModeEnabled },
+                        set: { enabled in
+                            Task { @MainActor in
+                                await engine.setContinuousModeEnabled(enabled)
+                            }
+                        }
+                    )
+                )
+
+                Text(
+                    "Continuous mode keeps the recorder open. Add as many spoken actions as you need and map each one to Push Text to Stack, Submit Stack, Reset Stack, or a keyboard shortcut. Stack actions end the current segment automatically."
+                )
+                .settingsDescription()
+
+                Button("Configure Spoken Actions") {
+                    MainWindowNavigation.shared.navigate(to: .spokenActions)
                 }
             }
 

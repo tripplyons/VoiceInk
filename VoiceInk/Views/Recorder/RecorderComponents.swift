@@ -336,6 +336,37 @@ struct LiveTranscriptView: View {
     }
 }
 
+// MARK: - Continuous Transcript Editor
+
+struct ContinuousTranscriptEditor<S: RecorderStateProvider & ObservableObject>: View {
+    @ObservedObject var stateProvider: S
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextEditor(
+                text: Binding(
+                    get: { stateProvider.continuousStackText },
+                    set: { stateProvider.replaceContinuousStack(with: $0) }
+                )
+            )
+            .font(.system(size: 12))
+            .foregroundColor(.white.opacity(0.8))
+            .scrollContentBackground(.hidden)
+
+            if !stateProvider.partialTranscript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(stateProvider.partialTranscript)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.8))
+                    .lineLimit(2)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 5)
+            }
+        }
+        .padding(.horizontal, 4)
+        .frame(height: 56)
+    }
+}
+
 // MARK: - Recorder Status Display
 
 struct RecorderStatusDisplay: View {

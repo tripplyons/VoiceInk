@@ -12,7 +12,7 @@ struct SpokenActionsView: View {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Text("Spoken Actions").font(.title2.bold())
-          Text("Run a keyboard shortcut when a dictation matches a phrase.")
+          Text("Map spoken phrases to keyboard and continuous-mode stack actions.")
             .foregroundStyle(.secondary)
         }
         Spacer()
@@ -26,7 +26,7 @@ struct SpokenActionsView: View {
         ContentUnavailableView(
           "No Spoken Actions",
           systemImage: "quote.bubble",
-          description: Text("Add a phrase and the keyboard shortcut VoiceInk should run.")
+          description: Text("Add a phrase and choose what VoiceInk should do when it matches.")
         )
       } else {
         List {
@@ -68,7 +68,10 @@ private struct SpokenActionRow: View {
       VStack(alignment: .leading, spacing: 3) {
         Text(action.phrase).font(.headline)
         HStack(spacing: 8) {
-          Text(action.shortcut.displayString)
+          Text(action.operation.displayName)
+          if action.operation.usesKeyboardShortcut {
+            Text(action.shortcut.displayString)
+          }
           if action.endsDictationAutomatically {
             Label("Auto-end", systemImage: "stop.circle")
           }
@@ -110,12 +113,22 @@ private struct SpokenActionEditor: View {
       Text("Spoken Action").font(.title2.bold())
       Form {
         TextField("Spoken phrase", text: $draft.phrase)
-        LabeledContent("Keyboard shortcut") {
-          ActionShortcutRecorder(shortcut: $draft.shortcut)
+        Picker("Action", selection: $draft.operation) {
+          ForEach(SpokenPhraseAction.Operation.allCases, id: \.self) { operation in
+            Text(operation.displayName).tag(operation)
+          }
+        }
+        if draft.operation.usesKeyboardShortcut {
+          LabeledContent("Keyboard shortcut") {
+            ActionShortcutRecorder(shortcut: $draft.shortcut)
+          }
         }
         Toggle(
           "Automatically end dictation when this phrase appears at the end of the preview",
           isOn: $draft.endsDictationAutomatically)
+        Text("Continuous mode uses auto-end actions as its voice-command vocabulary.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
         Toggle(
           "Start a new dictation after running the keyboard shortcut",
           isOn: $draft.startsNewDictationAutomatically)
@@ -125,7 +138,11 @@ private struct SpokenActionEditor: View {
         Spacer()
         Button("Cancel") { dismiss() }
         Button("Save") {
-          onSave(draft)
+          var action = draft
+          if action.operation != .keyboardShortcut {
+            action.endsDictationAutomatically = true
+          }
+          onSave(action)
           dismiss()
         }
         .buttonStyle(.borderedProminent)

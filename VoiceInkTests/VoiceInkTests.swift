@@ -78,6 +78,99 @@ struct VoiceInkTests {
         #expect(!decoded.startsNewDictationAutomatically)
     }
 
+    @Test func continuousModeUsesAnExplicitPushAction() throws {
+        var action = phraseAction("push")
+        action.operation = .pushStack
+        let match = try #require(
+            ContinuousVoiceCommandMatcher.match(
+                in: "first thought push",
+                actions: [action]
+            )
+        )
+
+        #expect(match.command == .pushStack)
+        #expect(match.remainingText == "first thought")
+    }
+
+    @Test func continuousModeMapsMultipleKeywordsToStackOperations() throws {
+        var submitAction = phraseAction("send it")
+        submitAction.operation = .submitStack
+        var resetAction = phraseAction("start over")
+        resetAction.operation = .resetStack
+
+        let submit = try #require(
+            ContinuousVoiceCommandMatcher.match(in: "send it", actions: [submitAction, resetAction])
+        )
+        let reset = try #require(
+            ContinuousVoiceCommandMatcher.match(in: "start over", actions: [submitAction, resetAction])
+        )
+
+        #expect(submit.command == .submitStack)
+        #expect(reset.command == .resetStack)
+    }
+
+    @Test func continuousModeUsesAutoEndSpokenActionsAsKeyboardCommands() throws {
+        let action = phraseAction("press return", autoEnd: true)
+        let match = try #require(
+            ContinuousVoiceCommandMatcher.match(
+                in: "send this press return",
+                actions: [action]
+            )
+        )
+
+        #expect(match.command == .runShortcut(action.shortcut))
+        #expect(match.remainingText == "send this")
+    }
+
+    @Test func continuousModeSupportsSubmitAndShortcutAsOneAction() throws {
+        var action = phraseAction("send and continue", autoEnd: true)
+        action.operation = .submitStackAndKeyboardShortcut
+        let match = try #require(
+            ContinuousVoiceCommandMatcher.match(in: "draft send and continue", actions: [action])
+        )
+
+        #expect(match.command == .submitStackAndRunShortcut(action.shortcut))
+        #expect(match.remainingText == "draft")
+    }
+
+    @Test func spokenActionOperationDefaultsToKeyboardShortcutForOlderSettings() throws {
+        let action = phraseAction("press return", autoEnd: true)
+        let data = try JSONEncoder().encode(action)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "operation")
+        let decoded = try JSONDecoder().decode(
+            SpokenPhraseAction.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.operation == .keyboardShortcut)
+    }
+
+    @Test func unknownSpokenActionOperationKeepsOlderActionUsable() throws {
+        let action = phraseAction("press return", autoEnd: true)
+        let data = try JSONEncoder().encode(action)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object["operation"] = "futureOperation"
+        let decoded = try JSONDecoder().decode(
+            SpokenPhraseAction.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.operation == .keyboardShortcut)
+    }
+
+    @Test func continuousTextStackRetainsEntriesUntilSubmissionIsHandled() {
+        var stack = ContinuousTextStack()
+        stack.push(" first ")
+        stack.push("second")
+
+        #expect(stack.entries == ["first", "second"])
+        #expect(stack.text == "first second")
+
+        stack.reset()
+        #expect(stack.isEmpty)
+    }
+
     private func phraseAction(_ phrase: String, autoEnd: Bool = false) -> SpokenPhraseAction {
         SpokenPhraseAction(
             phrase: phrase,

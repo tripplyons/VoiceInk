@@ -22,6 +22,11 @@ class TranscriptionPipeline {
         )
     }
 
+    struct ContinuousHooks {
+        let matchCommand: (String) -> ContinuousVoiceCommandMatch?
+        let handleSegment: (String, ContinuousVoiceCommand?) async -> Void
+    }
+
     private let modelContext: ModelContext
     private let serviceRegistry: TranscriptionServiceRegistry
     private let enhancementService: AIEnhancementService?
@@ -56,6 +61,7 @@ class TranscriptionPipeline {
         session: TranscriptionSession?,
         triggerWordModeSelection: @escaping (String) -> String? = { _ in nil },
         spokenPhraseMatch: @escaping (String) -> SpokenPhraseMatch? = { _ in nil },
+        continuous: ContinuousHooks? = nil,
         enhancementConfiguration: @escaping () -> EnhancementRuntimeConfiguration?,
         recordingContextSnapshot: @escaping () async -> RecordingContextSnapshot? = { nil },
         outputConfiguration: @escaping () -> OutputRuntimeConfiguration,
@@ -72,6 +78,7 @@ class TranscriptionPipeline {
         var responseConfig: EnhancementRuntimeConfiguration?
         var spokenShortcut: Shortcut?
         var startsNewDictationAfterSpokenShortcut = false
+        var continuousCommand: ContinuousVoiceCommand?
 
         func finishCanceledTranscription() async {
             await onCancel()
@@ -137,7 +144,17 @@ class TranscriptionPipeline {
             }
 
             text = WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
-            if !assistant.isFollowUp, let phraseMatch = spokenPhraseMatch(text) {
+            if let continuous,
+                let commandMatch = continuous.matchCommand(text)
+            {
+                continuousCommand = commandMatch.command
+                text = commandMatch.remainingText
+            }
+
+            if continuous == nil,
+                !assistant.isFollowUp,
+                let phraseMatch = spokenPhraseMatch(text)
+            {
                 text = phraseMatch.remainingText
                 spokenShortcut = phraseMatch.action.shortcut
                 startsNewDictationAfterSpokenShortcut =
@@ -157,7 +174,8 @@ class TranscriptionPipeline {
 
             if !assistant.isFollowUp {
                 let shouldRespondInRecorder =
-                    resolvedOutputConfiguration.outputMode == .respond
+                    continuous == nil
+                    && resolvedOutputConfiguration.outputMode == .respond
                     && resolvedEnhancementConfiguration?.isEnabled == true
                     && resolvedEnhancementConfiguration.map { configuration in
                         enhancementService?.isConfigured(for: configuration) == true
@@ -225,7 +243,17 @@ class TranscriptionPipeline {
                 }
             }
 
+            if shouldCancel() {
+                await finishCanceledTranscription()
+                return false
+            }
+
             transcription.transcriptionStatus = TranscriptionStatus.completed.rawValue
+
+            if let continuous, !assistant.isFollowUp {
+                await continuous.handleSegment(finalText ?? "", continuousCommand)
+                return true
+            }
         } catch {
             let errorDescription = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
 

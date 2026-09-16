@@ -18,14 +18,31 @@ struct NotchRecorderView<S: RecorderStateProvider & ObservableObject>: View {
         case assistant
     }
 
+    private var displayedTranscript: String {
+        stateProvider.isContinuousModeEnabled
+            ? stateProvider.continuousTranscriptText
+            : stateProvider.partialTranscript
+    }
+
     private var displayState: DisplayState {
         if assistantSession.isVisible {
             return .assistant
         }
 
+        if stateProvider.isContinuousModeEnabled {
+            if showLiveTranscript && !displayedTranscript.isEmpty {
+                return .liveText
+            }
+            return stateProvider.recordingState == .recording
+                || stateProvider.recordingState == .transcribing
+                || stateProvider.recordingState == .enhancing
+                ? .active
+                : .collapsed
+        }
+
         switch stateProvider.recordingState {
         case .recording:
-            let shouldShowLive = showLiveTranscript && !stateProvider.partialTranscript.isEmpty
+            let shouldShowLive = showLiveTranscript && !displayedTranscript.isEmpty
             return shouldShowLive ? .liveText : .active
         case .transcribing, .enhancing:
             return .active
@@ -196,8 +213,12 @@ struct NotchRecorderView<S: RecorderStateProvider & ObservableObject>: View {
         VStack(spacing: 0) {
             if displayState == .liveText {
                 Divider().background(Color.white.opacity(0.15))
-                LiveTranscriptView(text: stateProvider.partialTranscript)
-                    .padding(.horizontal, 8)
+                if stateProvider.isContinuousModeEnabled {
+                    ContinuousTranscriptEditor(stateProvider: stateProvider)
+                } else {
+                    LiveTranscriptView(text: displayedTranscript)
+                        .padding(.horizontal, 8)
+                }
             }
         }
         .frame(height: displayState == .liveText ? transcriptPanelHeight : 0)

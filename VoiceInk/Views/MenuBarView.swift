@@ -42,6 +42,30 @@ struct MenuBarView: View {
 
     private var completedOnboardingMenu: some View {
         Group {
+            Toggle(
+                "Continuous Mode",
+                isOn: Binding(
+                    get: { engine.isContinuousModeEnabled },
+                    set: { enabled in
+                        Task { @MainActor in
+                            await engine.setContinuousModeEnabled(enabled)
+                        }
+                    }
+                )
+            )
+
+            if engine.isContinuousModeEnabled {
+                Text(
+                    engine.continuousStackCount == 0
+                        ? String(localized: "Configure stack commands in Spoken Actions")
+                        : String(
+                            format: String(localized: "%lld queued segments"),
+                            engine.continuousStackCount
+                        )
+                )
+                .foregroundColor(.secondary)
+            }
+
             Button("Toggle Recorder") {
                 recorderUIManager.handleToggleRecorderPanelNotification()
             }
