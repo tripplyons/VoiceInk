@@ -272,6 +272,12 @@ class RecordingShortcutManager: ObservableObject {
         switch action {
         case .quickAddToDictionary:
             DictionaryQuickAddManager.shared.toggle(modelContainer: engine.modelContext.container)
+        case .enableContinuousMode:
+            await engine.setContinuousModeEnabled(true)
+        case .toggleContinuousMode:
+            await engine.setContinuousModeEnabled(!engine.isContinuousModeEnabled)
+        case .stopContinuousMode:
+            await engine.setContinuousModeEnabled(false)
         default:
             break
         }

@@ -76,7 +76,7 @@ private struct SpokenActionRow: View {
             Label("Auto-end", systemImage: "stop.circle")
           }
           if action.startsNewDictationAutomatically {
-            Label("Start next", systemImage: "arrow.clockwise.circle")
+            Label("Keep listening", systemImage: "mic")
           }
         }
         .font(.caption)
@@ -130,8 +130,18 @@ private struct SpokenActionEditor: View {
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle(
-          "Start a new dictation after running the keyboard shortcut",
+          "Keep listening after running the keyboard shortcut",
           isOn: $draft.startsNewDictationAutomatically)
+        if draft.operation == .keyboardShortcut && draft.startsNewDictationAutomatically {
+          Text("With live transcription and auto-end enabled, only the matched phrase is removed. The key runs without submitting text or restarting the recorder.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        if draft.operation == .exitContinuousMode {
+          Text("Stops continuous mode and discards queued text without submitting it.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
         Toggle("Enabled", isOn: $draft.isEnabled)
       }
       HStack {

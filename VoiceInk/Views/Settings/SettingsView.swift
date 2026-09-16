@@ -128,6 +128,12 @@ struct SettingsView: View {
             }
 
             Section("Continuous Mode") {
+                ForEach(ShortcutAction.continuousModeActions, id: \.self) { action in
+                    LabeledContent(action.displayName) {
+                        ShortcutRecorder(action: action)
+                    }
+                }
+
                 Toggle(
                     "Continuous Mode",
                     isOn: Binding(

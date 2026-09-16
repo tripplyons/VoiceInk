@@ -8,6 +8,7 @@ struct SpokenPhraseAction: Codable, Equatable, Identifiable {
     case pushStack
     case submitStack
     case resetStack
+    case exitContinuousMode
     case submitStackAndKeyboardShortcut
 
     var displayName: String {
@@ -20,6 +21,8 @@ struct SpokenPhraseAction: Codable, Equatable, Identifiable {
         return String(localized: "Submit Stack")
       case .resetStack:
         return String(localized: "Reset Stack")
+      case .exitContinuousMode:
+        return String(localized: "Exit Continuous Mode")
       case .submitStackAndKeyboardShortcut:
         return String(localized: "Submit Stack + Keyboard Shortcut")
       }
@@ -143,7 +146,7 @@ enum SpokenPhraseMatcher {
     actions.filter { $0.isEnabled && !normalized($0.phrase).isEmpty }
   }
 
-  private static func words(in text: String) -> [(value: String, range: Range<String.Index>)] {
+  static func words(in text: String) -> [(value: String, range: Range<String.Index>)] {
     var result: [(String, Range<String.Index>)] = []
     var start: String.Index?
     var index = text.startIndex

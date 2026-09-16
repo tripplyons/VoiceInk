@@ -60,6 +60,7 @@ class TranscriptionPipeline {
         formattingConfiguration resolveFormattingConfiguration: @escaping () -> TranscriptionFormattingConfiguration,
         session: TranscriptionSession?,
         triggerWordModeSelection: @escaping (String) -> String? = { _ in nil },
+        cleanLiveCommands: @escaping (String) -> String = { $0 },
         spokenPhraseMatch: @escaping (String) -> SpokenPhraseMatch? = { _ in nil },
         continuous: ContinuousHooks? = nil,
         enhancementConfiguration: @escaping () -> EnhancementRuntimeConfiguration?,
@@ -115,6 +116,7 @@ class TranscriptionPipeline {
                     context: transcriptionConfiguration.requestContext
                 )
             }
+            text = cleanLiveCommands(text)
             text = TranscriptionOutputFilter.filter(text)
             let transcriptionDuration = Date().timeIntervalSince(transcriptionStart)
 

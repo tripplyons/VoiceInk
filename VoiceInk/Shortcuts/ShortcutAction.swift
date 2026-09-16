@@ -5,6 +5,9 @@ enum ShortcutAction: Hashable {
     case secondaryRecording
     case cancelRecorder
     case quickAddToDictionary
+    case enableContinuousMode
+    case toggleContinuousMode
+    case stopContinuousMode
     case mode(UUID)
     case recorderPanelEscape
     case recorderPanelMode(Int)
@@ -32,6 +35,12 @@ enum ShortcutAction: Hashable {
             return "cancelRecorder"
         case .quickAddToDictionary:
             return "quickAddToDictionary"
+        case .enableContinuousMode:
+            return "enableContinuousMode"
+        case .toggleContinuousMode:
+            return "toggleContinuousMode"
+        case .stopContinuousMode:
+            return "stopContinuousMode"
         case .mode(let id):
             return "mode_\(id.uuidString)"
         case .recorderPanelEscape:
@@ -51,6 +60,12 @@ enum ShortcutAction: Hashable {
             return String(localized: "Cancel Recording")
         case .quickAddToDictionary:
             return String(localized: "Quick Add to Dictionary")
+        case .enableContinuousMode:
+            return String(localized: "Enable Continuous Mode")
+        case .toggleContinuousMode:
+            return String(localized: "Toggle Continuous Mode")
+        case .stopContinuousMode:
+            return String(localized: "Stop Continuous Mode")
         case .mode(let id):
             if let config = ModeManager.shared.getConfiguration(with: id) {
                 return String(format: String(localized: "%@ Mode"), config.name)
@@ -68,9 +83,11 @@ enum ShortcutAction: Hashable {
         }
     }
 
-    static let globalUtilityActions: [Self] = [
-        .quickAddToDictionary,
+    static let continuousModeActions: [Self] = [
+        .enableContinuousMode, .toggleContinuousMode, .stopContinuousMode,
     ]
+
+    static let globalUtilityActions: [Self] = [.quickAddToDictionary] + continuousModeActions
 
     static let recorderPanelStoredActions: [Self] = [
         .cancelRecorder

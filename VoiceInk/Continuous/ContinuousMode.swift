@@ -5,6 +5,7 @@ enum ContinuousVoiceCommand: Equatable {
     case pushStack
     case submitStack
     case resetStack
+    case exitContinuousMode
     case runShortcut(Shortcut)
     case submitStackAndRunShortcut(Shortcut)
 }
@@ -84,6 +85,8 @@ enum ContinuousVoiceCommandMatcher {
                 command = .submitStack
             case .resetStack:
                 command = .resetStack
+            case .exitContinuousMode:
+                command = .exitContinuousMode
             case .submitStackAndKeyboardShortcut:
                 command = .submitStackAndRunShortcut(action.shortcut)
             }

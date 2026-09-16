@@ -113,6 +113,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
     private var activeRecordingContextTasks: [Task<Void, Never>] = []
     private var voiceInkRefinePreparationTask: Task<Void, Never>?
     private var spokenPhraseTriggerDetector = SpokenPhraseTriggerDetector()
+    private var liveSpokenShortcuts = LiveSpokenShortcuts()
 
     let recorder = Recorder()
     var recordedFile: URL? = nil
@@ -262,6 +263,9 @@ class VoiceInkEngine: NSObject, ObservableObject {
         guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return }
 
         switch command {
+        case .exitContinuousMode:
+            await setContinuousModeEnabled(false)
+            return
         case .resetStack:
             resetContinuousStack()
         case .submitStack:
@@ -371,6 +375,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
             partialTranscript = ""
             activeRecordingUseCase = recordingUseCase
             activeContinuousCommand = nil
+            liveSpokenShortcuts = LiveSpokenShortcuts()
             spokenPhraseTriggerDetector.reset()
             clearActiveRecordingContext()
 
@@ -482,11 +487,17 @@ class VoiceInkEngine: NSObject, ObservableObject {
                                             else {
                                                 return
                                             }
-                                            self.partialTranscript = partial
+                                            if let shortcut = self.liveSpokenShortcuts.consume(
+                                                in: partial, actions: SpokenPhraseActionStore.shared.actions
+                                            ) {
+                                                SpokenShortcutRunner.run(shortcut)
+                                            }
+                                            let visible = self.liveSpokenShortcuts.removingConsumedPhrases(from: partial)
+                                            self.partialTranscript = visible
                                             if self.isContinuousModeEnabled {
-                                                self.handleContinuousCommandPreview(partial, startID: startID)
+                                                self.handleContinuousCommandPreview(visible, startID: startID)
                                             } else {
-                                                self.handleSpokenActionPreview(partial, startID: startID)
+                                                self.handleSpokenActionPreview(visible, startID: startID)
                                             }
                                         }
                                     }
@@ -703,6 +714,9 @@ class VoiceInkEngine: NSObject, ObservableObject {
             triggerWordModeSelection: { [weak self] text in
                 self?.selectTriggerWordModeIfNeeded(for: text)
             },
+            cleanLiveCommands: { [liveSpokenShortcuts] text in
+                liveSpokenShortcuts.removingConsumedPhrases(from: text)
+            },
             spokenPhraseMatch: { [weak self] text in
                 self?.resolveSpokenPhrase(in: text)
             },
@@ -865,7 +879,11 @@ class VoiceInkEngine: NSObject, ObservableObject {
                 self.recordingState == .recording,
                 self.isContinuousModeEnabled
             else { return }
-            await self.toggleRecord()
+            if match.command == .exitContinuousMode {
+                await self.setContinuousModeEnabled(false)
+            } else {
+                await self.toggleRecord()
+            }
         }
     }
 
