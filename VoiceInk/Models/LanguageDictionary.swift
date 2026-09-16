@@ -93,6 +93,10 @@ enum LanguageDictionary {
         includesAutoDetect: true
     )
 
+    static let cohereTranscribe = forCodes([
+        "ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh",
+    ])
+
     static let nemotronLatin: [String: String] = [
         "auto": "Auto-detect",
         "de-DE": "German",

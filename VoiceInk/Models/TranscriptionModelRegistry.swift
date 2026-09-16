@@ -52,6 +52,16 @@ enum TranscriptionModelRegistry {
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: false, provider: .fluidAudio)
             ),
             FluidAudioModel(
+                name: "cohere-transcribe-03-2026",
+                displayName: "Cohere Transcribe 03-2026",
+                description: "High-accuracy transcription in 14 languages, optimized for Apple silicon. Batch only",
+                size: "2.1 GB",
+                speed: 0.35,
+                accuracy: 0.98,
+                ramUsage: 3.0,
+                supportedLanguages: LanguageDictionary.cohereTranscribe
+            ),
+            FluidAudioModel(
                 name: "nemotron-latin-0.6b",
                 displayName: "Nemotron Latin",
                 description: "NVIDIA's Nemotron streaming model with Latin language support",

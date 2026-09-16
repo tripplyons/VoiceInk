@@ -7,6 +7,8 @@ class FluidAudioTranscriptionService: TranscriptionService {
     private var asrManager: AsrManager?
     private var unifiedAsrManager: UnifiedAsrManager?
     private var nemotronAsrManager: StreamingNemotronMultilingualAsrManager?
+    private var coherePipeline: CoherePipeline?
+    private var cohereModels: CoherePipeline.LoadedModels?
     private var activeVersion: AsrModelVersion?
     private var activeNemotronModelName: String?
     private var cachedModels: AsrModels?
@@ -37,6 +39,8 @@ class FluidAudioTranscriptionService: TranscriptionService {
 
         unifiedAsrManager = nil
         nemotronAsrManager = nil
+        coherePipeline = nil
+        cohereModels = nil
         asrManager = nil
         activeVersion = nil
         activeNemotronModelName = nil
@@ -81,6 +85,22 @@ class FluidAudioTranscriptionService: TranscriptionService {
         try await manager.loadModels(from: FluidAudioModelManager.nemotronCacheDirectory(for: modelName))
         self.nemotronAsrManager = manager
         self.activeNemotronModelName = modelName
+    }
+
+    private func ensureCohereModelsLoaded() async throws {
+        if coherePipeline != nil, cohereModels != nil {
+            return
+        }
+
+        await cleanupLoadedManagers()
+
+        let directory = FluidAudioModelManager.cohereTranscribeCacheDirectory()
+        cohereModels = try await CoherePipeline.loadModels(
+            encoderDir: directory,
+            decoderDir: directory,
+            vocabDir: directory
+        )
+        coherePipeline = CoherePipeline()
     }
 
     // Returns cached models or loads from disk; deduplicates concurrent loads
@@ -133,6 +153,11 @@ class FluidAudioTranscriptionService: TranscriptionService {
             return
         }
 
+        if FluidAudioModelManager.isCohereTranscribeModel(named: model.name) {
+            try await ensureCohereModelsLoaded()
+            return
+        }
+
         if FluidAudioModelManager.isParakeetUnifiedModel(named: model.name) {
             try await ensureUnifiedModelsLoaded()
             return
@@ -144,6 +169,31 @@ class FluidAudioTranscriptionService: TranscriptionService {
     func transcribe(audioURL: URL, model: any TranscriptionModel, context: TranscriptionRequestContext) async throws
         -> String
     {
+        if FluidAudioModelManager.isCohereTranscribeModel(named: model.name) {
+            try await ensureCohereModelsLoaded()
+            guard let coherePipeline, let cohereModels else {
+                throw ASRError.notInitialized
+            }
+
+            let compatibleLanguage = TranscriptionLanguageSupport.validLanguageOrFallback(
+                context.language,
+                for: model
+            )
+            let languageCode = compatibleLanguage
+                .replacingOccurrences(of: "_", with: "-")
+                .split(separator: "-")
+                .first
+                .map(String.init) ?? "en"
+            let language = CohereAsrConfig.Language(rawValue: languageCode) ?? .english
+            let speechAudio = try loadAudioSamples(from: audioURL)
+            let result = try await coherePipeline.transcribeLong(
+                audio: speechAudio,
+                models: cohereModels,
+                language: language
+            )
+            return TextNormalizer.shared.normalizeSentence(result.text)
+        }
+
         if FluidAudioModelManager.isParakeetUnifiedModel(named: model.name) {
             try await ensureUnifiedModelsLoaded()
             guard let unifiedAsrManager else {

@@ -20,6 +20,7 @@ struct FluidAudioModelCardView: View {
 
     private var showsExperimentalBadge: Bool {
         FluidAudioModelManager.isParakeetUnifiedModel(named: model.name)
+            || FluidAudioModelManager.isCohereTranscribeModel(named: model.name)
             || FluidAudioModelManager.isNemotronModel(named: model.name)
     }
 

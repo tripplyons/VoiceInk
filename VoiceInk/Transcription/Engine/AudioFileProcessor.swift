@@ -50,72 +50,72 @@ class AudioProcessor {
             samples = try await readUsingAssetReader(url)
         }
 
-        return peakNormalized(samples)
-    }
-
-    func normalizeAudioFile(at url: URL) throws {
-        let peak = try peakAmplitude(in: url)
-        guard peak > 0 else { return }
-
-        let temporaryURL = url.deletingLastPathComponent()
-            .appendingPathComponent(".\(url.lastPathComponent).normalizing-\(UUID().uuidString).wav")
-        defer { try? FileManager.default.removeItem(at: temporaryURL) }
-
-        try writePeakNormalizedAudio(from: url, to: temporaryURL, gain: 1 / peak)
-        _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
-    }
-
-    private func peakAmplitude(in url: URL) throws -> Float {
-        let audioFile = try AVAudioFile(forReading: url)
-        let format = audioFile.processingFormat
-        let chunkSize: AVAudioFrameCount = 65_536
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
-            throw AudioProcessingError.sampleExtractionFailed
-        }
-
-        var peak: Float = 0
-        while audioFile.framePosition < audioFile.length {
-            try audioFile.read(into: buffer, frameCount: chunkSize)
-            guard buffer.frameLength > 0 else { break }
-            guard let channels = buffer.floatChannelData else {
-                throw AudioProcessingError.sampleExtractionFailed
-            }
-
-            for channel in 0..<Int(format.channelCount) {
-                let samples = UnsafeBufferPointer(start: channels[channel], count: Int(buffer.frameLength))
-                peak = max(peak, samples.lazy.map(abs).max() ?? 0)
-            }
-        }
-        return peak
-    }
-
-    private func writePeakNormalizedAudio(from sourceURL: URL, to destinationURL: URL, gain: Float) throws {
-        let sourceFile = try AVAudioFile(forReading: sourceURL)
-        let format = sourceFile.processingFormat
-        let outputFile = try AVAudioFile(
-            forWriting: destinationURL,
-            settings: sourceFile.fileFormat.settings,
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved
+        var normalizedSamples = samples
+        SpeechAudioNormalizer.normalize(
+            &normalizedSamples,
+            sampleRate: AudioFormat.targetSampleRate
         )
+        return normalizedSamples
+    }
+
+    /// Normalize a recording from its speech level, then tame short transients.
+    func normalizeAudioFile(at url: URL) throws {
+        let inputFile = try AVAudioFile(forReading: url)
+        let format = inputFile.processingFormat
+        let channelCount = Int(format.channelCount)
         let chunkSize: AVAudioFrameCount = 65_536
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
             throw AudioProcessingError.conversionFailed
         }
 
-        while sourceFile.framePosition < sourceFile.length {
-            try sourceFile.read(into: buffer, frameCount: chunkSize)
+        var frameLevels: [Float] = []
+        while inputFile.framePosition < inputFile.length {
+            try inputFile.read(into: buffer, frameCount: chunkSize)
             guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
                 throw AudioProcessingError.sampleExtractionFailed
             }
 
-            for channel in 0..<Int(format.channelCount) {
-                for frame in 0..<Int(buffer.frameLength) {
-                    channels[channel][frame] *= gain
-                }
+            for channel in 0..<channelCount {
+                frameLevels += SpeechAudioNormalizer.frameRMS(
+                    UnsafeBufferPointer(start: channels[channel], count: Int(buffer.frameLength)),
+                    sampleRate: format.sampleRate
+                )
+            }
+        }
+        guard !frameLevels.isEmpty else { return }
+
+        let temporaryURL = url.deletingLastPathComponent()
+            .appendingPathComponent(".\(url.lastPathComponent).normalizing-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+        let outputFile = try AVAudioFile(
+            forWriting: temporaryURL,
+            settings: inputFile.fileFormat.settings,
+            commonFormat: format.commonFormat,
+            interleaved: format.isInterleaved
+        )
+        let gain = SpeechAudioNormalizer.normalizationGain(for: frameLevels)
+        var limiters = (0..<channelCount).map { _ in
+            SpeechAudioLimiter(sampleRate: format.sampleRate)
+        }
+
+        inputFile.framePosition = 0
+        while inputFile.framePosition < inputFile.length {
+            try inputFile.read(into: buffer, frameCount: chunkSize)
+            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
+                throw AudioProcessingError.sampleExtractionFailed
+            }
+
+            for channel in 0..<channelCount {
+                limiters[channel].process(
+                    channels[channel],
+                    count: Int(buffer.frameLength),
+                    gain: gain
+                )
             }
             try outputFile.write(from: buffer)
         }
+        _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
     }
 
     private func readUsingAudioFile(_ url: URL) throws -> [Float] {
@@ -322,11 +322,6 @@ class AudioProcessor {
         return samples
     }
 
-    private func peakNormalized(_ samples: [Float]) -> [Float] {
-        let maxSample = samples.lazy.map(abs).max() ?? 0
-        guard maxSample > 0 else { return samples }
-        return samples.map { $0 / maxSample }
-    }
 
     func saveSamplesAsWav(samples: [Float], to url: URL) throws {
         let outputFormat = AVAudioFormat(

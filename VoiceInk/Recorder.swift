@@ -202,7 +202,7 @@ class Recorder: NSObject, ObservableObject {
                 }.value
             } catch {
                 logger.error(
-                    "Failed to peak-normalize recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
+                    "Failed to speech-normalize recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
                 )
             }
         }

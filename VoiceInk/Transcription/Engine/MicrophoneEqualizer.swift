@@ -159,9 +159,6 @@ extension AudioProcessor {
             return
         }
 
-        let peak = try equalizedPeakAmplitude(in: url, settings: settings)
-        guard peak > 0 else { return }
-
         let temporaryURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).equalizing-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
@@ -170,42 +167,10 @@ extension AudioProcessor {
             from: url,
             to: temporaryURL,
             settings: settings,
-            gain: 1 / peak
+            gain: 1
         )
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
-    }
-
-    private func equalizedPeakAmplitude(
-        in url: URL,
-        settings: MicrophoneEqualizerSettings
-    ) throws -> Float {
-        let audioFile = try AVAudioFile(forReading: url)
-        let format = audioFile.processingFormat
-        let chunkSize: AVAudioFrameCount = 65_536
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
-            throw AudioProcessingError.sampleExtractionFailed
-        }
-
-        var equalizer = MicrophoneEqualizer(
-            settings: settings,
-            sampleRate: format.sampleRate,
-            channelCount: Int(format.channelCount)
-        )
-        var peak: Float = 0
-
-        while audioFile.framePosition < audioFile.length {
-            try audioFile.read(into: buffer, frameCount: chunkSize)
-            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
-                throw AudioProcessingError.sampleExtractionFailed
-            }
-
-            for channel in 0..<Int(format.channelCount) {
-                equalizer.process(channels[channel], count: Int(buffer.frameLength), channel: channel)
-                let samples = UnsafeBufferPointer(start: channels[channel], count: Int(buffer.frameLength))
-                peak = max(peak, samples.lazy.map(abs).max() ?? 0)
-            }
-        }
-        return peak
+        try normalizeAudioFile(at: url)
     }
 
     private func writeEqualizedAudio(

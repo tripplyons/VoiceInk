@@ -76,6 +76,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private var conversionBuffer: UnsafeMutablePointer<Int16>?
     private var conversionBufferSize: UInt32 = 0
     private var liveEqualizer: MicrophoneEqualizer?
+    private var liveSpeechLeveler: StreamingSpeechLeveler?
 
     // Audio metering. Store bit patterns so the render callback never locks.
     private let averagePowerBits = ManagedAtomic<UInt32>(Float32(-160.0).bitPattern)
@@ -194,12 +195,14 @@ final class CoreAudioRecorder: @unchecked Sendable {
                     channelCount: 1
                 )
                 : nil
+            liveSpeechLeveler = StreamingSpeechLeveler(sampleRate: outputFormat.mSampleRate)
 
             try startAudioUnit()
         } catch {
             isRecording = false
             recordingActive.store(false, ordering: .releasing)
             liveEqualizer = nil
+            liveSpeechLeveler = nil
             closeOutputFile()
             recordingURL = nil
             teardownPreparedAudioUnit()
@@ -236,6 +239,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
 
         closeOutputFile()
         liveEqualizer = nil
+        liveSpeechLeveler = nil
         recordingURL = nil
 
         resetMeters()
@@ -762,6 +766,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
             conversionBufferSize = 0
         }
         liveEqualizer = nil
+        liveSpeechLeveler = nil
 
         if let buffer = renderBuffer {
             buffer.deallocate()
@@ -1062,8 +1067,9 @@ final class CoreAudioRecorder: @unchecked Sendable {
             }
         }
 
-        // Shape the same signal sent to the file and the streaming callback.
+        // Shape and level the same signal sent to the file and streaming callback.
         liveEqualizer?.process(equalizerBuffer, count: Int(outputFrameCount), channel: 0)
+        liveSpeechLeveler?.process(equalizerBuffer, count: Int(outputFrameCount))
 
         for frame in 0..<Int(outputFrameCount) {
             let scaled = equalizerBuffer[frame] * 32767.0

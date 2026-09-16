@@ -289,7 +289,8 @@ struct VoiceInkTests {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let url = directory.appendingPathComponent("equalized.wav")
-        let samples = sineWave(frequency: 1_000, sampleRate: 16_000, amplitude: 0.05)
+        let samples = [Float](repeating: 0, count: 4_000)
+            + sineWave(frequency: 1_000, sampleRate: 16_000, amplitude: 0.05)
         let settings = MicrophoneEqualizerSettings(
             isEnabled: true,
             highPassFrequency: 80,
@@ -301,31 +302,121 @@ struct VoiceInkTests {
 
         try processor.processMicrophoneRecording(at: url, settings: settings)
 
-        let peak = try peakAmplitude(in: url)
-        #expect(peak > 0.99 && peak <= 1.0)
+        let processedSamples = try readSamples(from: url)
+        let speechRMS = rms(processedSamples.suffix(12_000))
+        #expect(speechRMS > 0.09 && speechRMS < 0.11)
+        #expect((processedSamples.lazy.map(abs).max() ?? 0) <= 0.95)
     }
 
-    @Test func peakNormalizesQuietAudioFile() throws {
+    @Test func speechNormalizationIgnoresIsolatedPeak() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let url = directory.appendingPathComponent("quiet.wav")
-        var samples = [Float](repeating: 0.05, count: 131_072)
-        samples[100_000] = -0.2
+        let url = directory.appendingPathComponent("transient.wav")
+        var samples = [Float](repeating: 0, count: 16_000)
+        samples[1_000] = 0.95
+        samples += sineWave(frequency: 220, sampleRate: 16_000, amplitude: 0.03, duration: 2)
 
         let processor = AudioProcessor()
         try processor.saveSamplesAsWav(samples: samples, to: url)
-        let peakBefore = try peakAmplitude(in: url)
-
         try processor.normalizeAudioFile(at: url)
-        let peakAfter = try peakAmplitude(in: url)
-        let normalizedBackgroundSample = try sample(at: 0, in: url)
 
-        #expect(peakBefore > 0.19 && peakBefore < 0.21)
-        #expect(peakAfter > 0.99 && peakAfter <= 1.0)
-        #expect(normalizedBackgroundSample > 0.24 && normalizedBackgroundSample < 0.26)
+        let normalizedSamples = try readSamples(from: url)
+        let speechRMS = rms(normalizedSamples.suffix(16_000))
+        let peak = normalizedSamples.lazy.map(abs).max() ?? 0
+
+        #expect(speechRMS > 0.08 && speechRMS < 0.09)
+        #expect(peak <= 0.95)
+    }
+
+    @Test func streamingSpeechLevelerRecoversAfterTransient() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        let warmup = processInStreamingChunks(
+            sineWave(frequency: 220, sampleRate: sampleRate, amplitude: 0.03),
+            with: &leveler
+        )
+
+        var transient = [Float](repeating: 0, count: 320)
+        transient[0] = 1
+        let limitedTransient = processInStreamingChunks(transient, with: &leveler)
+        let speechAfterTransient = processInStreamingChunks(
+            sineWave(
+                frequency: 220,
+                sampleRate: sampleRate,
+                amplitude: 0.03,
+                duration: 0.5
+            ),
+            with: &leveler
+        )
+
+        #expect(rms(warmup.suffix(4_000)) > 0.075)
+        #expect((limitedTransient.lazy.map(abs).max() ?? 0) <= 0.95)
+        #expect(rms(speechAfterTransient.suffix(4_000)) > 0.075)
+    }
+
+    @Test func streamingSpeechLevelerRelaxesTowardNeutralDuringSilence() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        let quietSpeech = processInStreamingChunks(
+            sineWave(frequency: 220, sampleRate: sampleRate, amplitude: 0.03),
+            with: &leveler
+        )
+        _ = processInStreamingChunks(
+            [Float](repeating: 0, count: Int(sampleRate * 3)),
+            with: &leveler
+        )
+        let speechAtNewLevel = processInStreamingChunks(
+            sineWave(
+                frequency: 220,
+                sampleRate: sampleRate,
+                amplitude: 0.1,
+                duration: 0.75
+            ),
+            with: &leveler
+        )
+
+        #expect(rms(quietSpeech.suffix(4_000)) > 0.075)
+        #expect(rms(speechAtNewLevel.suffix(4_000)) > 0.09)
+        #expect(rms(speechAtNewLevel.suffix(4_000)) < 0.11)
+    }
+
+    @Test func streamingSpeechLevelerTracksRecentSpeechWithoutSilence() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        _ = processInStreamingChunks(
+            sineWave(frequency: 220, sampleRate: sampleRate, amplitude: 0.03),
+            with: &leveler
+        )
+        let louderSpeech = processInStreamingChunks(
+            sineWave(
+                frequency: 220,
+                sampleRate: sampleRate,
+                amplitude: 0.16,
+                duration: 4.5
+            ),
+            with: &leveler
+        )
+
+        #expect(rms(louderSpeech.suffix(4_000)) > 0.09)
+        #expect(rms(louderSpeech.suffix(4_000)) < 0.11)
+    }
+
+    private func processInStreamingChunks(
+        _ samples: [Float],
+        with leveler: inout StreamingSpeechLeveler,
+        chunkSize: Int = 320
+    ) -> [Float] {
+        var output: [Float] = []
+        output.reserveCapacity(samples.count)
+        for start in stride(from: 0, to: samples.count, by: chunkSize) {
+            var chunk = Array(samples[start..<min(start + chunkSize, samples.count)])
+            leveler.process(&chunk)
+            output += chunk
+        }
+        return output
     }
 
     private func sineWave(
@@ -347,15 +438,6 @@ struct VoiceInkTests {
             count += 1
         }
         return count > 0 ? sqrt(sum / Float(count)) : 0
-    }
-
-    private func peakAmplitude(in url: URL) throws -> Float {
-        let samples = try readSamples(from: url)
-        return samples.lazy.map(abs).max() ?? 0
-    }
-
-    private func sample(at index: Int, in url: URL) throws -> Float {
-        try readSamples(from: url)[index]
     }
 
     private func readSamples(from url: URL) throws -> [Float] {

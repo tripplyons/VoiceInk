@@ -36,6 +36,7 @@ class FluidAudioModelManager: ObservableObject {
     private enum FluidAudioModelKind {
         case parakeet(AsrModelVersion)
         case parakeetUnified
+        case cohereTranscribe
         case nemotron(NemotronVariant)
     }
 
@@ -45,6 +46,10 @@ class FluidAudioModelManager: ObservableObject {
 
     nonisolated static func isParakeetUnifiedModel(named modelName: String) -> Bool {
         modelName == "parakeet-unified-0.6b"
+    }
+
+    nonisolated static func isCohereTranscribeModel(named modelName: String) -> Bool {
+        modelName == "cohere-transcribe-03-2026"
     }
 
     nonisolated static let parakeetUnifiedPrecision: UnifiedEncoderPrecision = .int8
@@ -110,6 +115,10 @@ class FluidAudioModelManager: ObservableObject {
             return .parakeetUnified
         }
 
+        if isCohereTranscribeModel(named: modelName) {
+            return .cohereTranscribe
+        }
+
         return .parakeet(asrVersion(for: modelName))
     }
 
@@ -157,6 +166,11 @@ class FluidAudioModelManager: ObservableObject {
         case .parakeetUnified:
             let directory = cacheDirectory(for: modelName)
             return Self.parakeetUnifiedRequiredFiles.allSatisfy {
+                FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+            }
+        case .cohereTranscribe:
+            let directory = Self.cohereTranscribeCacheDirectory()
+            return ModelNames.CohereTranscribe.requiredModels.allSatisfy {
                 FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
             }
         case .parakeet(let version):
@@ -230,6 +244,18 @@ class FluidAudioModelManager: ObservableObject {
                     throw error
                 }
                 await manager.cleanup()
+            case .cohereTranscribe:
+                try await ModelHub.download(
+                    .cohereTranscribeCoreml,
+                    to: Self.fluidAudioModelsRootDirectory(),
+                    progressHandler: Self.downloadOnlyProgressHandler(forwarding: progressHandler)
+                )
+                beginModelPreparation(for: modelName, downloadID: downloadID)
+                _ = try await CoherePipeline.loadModels(
+                    encoderDir: Self.cohereTranscribeCacheDirectory(),
+                    decoderDir: Self.cohereTranscribeCacheDirectory(),
+                    vocabDir: Self.cohereTranscribeCacheDirectory()
+                )
             case .parakeet(let version):
                 guard let repo = Self.parakeetRepo(for: version) else {
                     throw AsrModelsError.loadingFailed("Unsupported Parakeet model version.")
@@ -331,6 +357,8 @@ class FluidAudioModelManager: ObservableObject {
             return Self.nemotronCacheDirectory(for: variant)
         case .parakeetUnified:
             return Self.parakeetUnifiedCacheDirectory()
+        case .cohereTranscribe:
+            return Self.cohereTranscribeCacheDirectory()
         case .parakeet(let version):
             return cacheDirectory(for: version)
         }
@@ -377,6 +405,11 @@ class FluidAudioModelManager: ObservableObject {
     nonisolated static func parakeetUnifiedCacheDirectory() -> URL {
         fluidAudioModelsRootDirectory()
             .appendingPathComponent(Repo.parakeetUnified.folderName, isDirectory: true)
+    }
+
+    nonisolated static func cohereTranscribeCacheDirectory() -> URL {
+        fluidAudioModelsRootDirectory()
+            .appendingPathComponent(Repo.cohereTranscribeCoreml.folderName, isDirectory: true)
     }
 
     // Matches the cache root used by FluidAudio's Unified managers.
