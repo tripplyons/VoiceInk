@@ -38,7 +38,7 @@ struct MicrophoneEqualizerSettingsView: View {
             )
 
             HStack {
-                Text("Applied before peak normalization")
+                Text("Applied to live and recorded audio")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

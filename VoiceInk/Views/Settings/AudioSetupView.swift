@@ -29,7 +29,7 @@ struct AudioSetupView: View {
             } header: {
                 Text("Microphone EQ")
             } footer: {
-                Text("Shapes recorded microphone audio before normalization and transcription. Live streaming audio is unchanged.")
+                Text("Shapes microphone audio before live transcription, recording, and normalization. Changes apply to the next recording.")
             }
 
             Section {

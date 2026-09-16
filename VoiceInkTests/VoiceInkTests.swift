@@ -143,6 +143,30 @@ struct VoiceInkTests {
         #expect(rms(tone.dropFirst(8_000)) > originalRMS * 3.5)
     }
 
+    @Test func microphoneEqualizerPreservesStateAcrossLiveChunks() {
+        let settings = MicrophoneEqualizerSettings(isEnabled: true)
+        let source = zip(
+            sineWave(frequency: 180, sampleRate: 16_000, amplitude: 0.25),
+            sineWave(frequency: 2_300, sampleRate: 16_000, amplitude: 0.1)
+        ).map { pair in pair.0 + pair.1 }
+        var wholeBuffer = source
+        var wholeEqualizer = MicrophoneEqualizer(settings: settings, sampleRate: 16_000, channelCount: 1)
+        wholeEqualizer.process(&wholeBuffer)
+
+        var chunkedEqualizer = MicrophoneEqualizer(settings: settings, sampleRate: 16_000, channelCount: 1)
+        var chunkedOutput: [Float] = []
+        for start in stride(from: 0, to: source.count, by: 257) {
+            var chunk = Array(source[start..<min(start + 257, source.count)])
+            chunkedEqualizer.process(&chunk)
+            chunkedOutput.append(contentsOf: chunk)
+        }
+
+        let maximumDifference = zip(wholeBuffer, chunkedOutput).map { pair in
+            abs(pair.0 - pair.1)
+        }.max() ?? 0
+        #expect(maximumDifference < 0.000_001)
+    }
+
     @Test func microphoneProcessingNormalizesEqualizedAudio() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

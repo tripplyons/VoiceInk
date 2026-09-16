@@ -133,6 +133,7 @@ class Recorder: NSObject, ObservableObject {
         UserDefaults.standard.set(String(currentDeviceID), forKey: "lastUsedMicrophoneDeviceID")
 
         let deviceID = currentDeviceID
+        let equalizerSettings = MicrophoneEqualizerSettingsStore.shared.settings
 
         audioRestorationTask?.cancel()
         audioRestorationTask = nil
@@ -148,7 +149,11 @@ class Recorder: NSObject, ObservableObject {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 audioSetupQueue.async {
                     do {
-                        try coreAudioRecorder.startRecording(toOutputFile: url, deviceID: deviceID)
+                        try coreAudioRecorder.startRecording(
+                            toOutputFile: url,
+                            deviceID: deviceID,
+                            equalizerSettings: equalizerSettings
+                        )
                         continuation.resume()
                     } catch {
                         continuation.resume(throwing: error)
@@ -191,17 +196,13 @@ class Recorder: NSObject, ObservableObject {
         }
 
         if let recordingURL, FileManager.default.fileExists(atPath: recordingURL.path) {
-            let equalizerSettings = MicrophoneEqualizerSettingsStore.shared.settings
             do {
                 try await Task.detached(priority: .userInitiated) {
-                    try AudioProcessor().processMicrophoneRecording(
-                        at: recordingURL,
-                        settings: equalizerSettings
-                    )
+                    try AudioProcessor().normalizeAudioFile(at: recordingURL)
                 }.value
             } catch {
                 logger.error(
-                    "Failed to process recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
+                    "Failed to peak-normalize recording file=\(recordingURL.lastPathComponent, privacy: .public) error=\(error, privacy: .public)"
                 )
             }
         }

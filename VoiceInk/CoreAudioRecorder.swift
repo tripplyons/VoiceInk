@@ -70,9 +70,12 @@ final class CoreAudioRecorder: @unchecked Sendable {
     // Output format (16kHz mono PCM Int16 for transcription)
     private var outputFormat = AudioStreamBasicDescription()
 
-    // Conversion buffer, used only on audioProcessingQueue.
+    // Conversion buffers and equalizer state, used only on audioProcessingQueue.
+    private var equalizerBuffer: UnsafeMutablePointer<Float32>?
+    private var equalizerBufferSize: UInt32 = 0
     private var conversionBuffer: UnsafeMutablePointer<Int16>?
     private var conversionBufferSize: UInt32 = 0
+    private var liveEqualizer: MicrophoneEqualizer?
 
     // Audio metering. Store bit patterns so the render callback never locks.
     private let averagePowerBits = ManagedAtomic<UInt32>(Float32(-160.0).bitPattern)
@@ -168,7 +171,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
     }
 
     /// Starts recording from the specified device to the given URL (WAV format)
-    func startRecording(toOutputFile url: URL, deviceID: AudioDeviceID) throws {
+    func startRecording(
+        toOutputFile url: URL,
+        deviceID: AudioDeviceID,
+        equalizerSettings: MicrophoneEqualizerSettings
+    ) throws {
         // Stop any existing recording
         stopRecording()
 
@@ -180,11 +187,19 @@ final class CoreAudioRecorder: @unchecked Sendable {
             // The output file is per recording; the AUHAL setup above is reused.
             try createOutputFile(at: url)
             resetAudioProcessingState()
+            liveEqualizer = equalizerSettings.isEnabled
+                ? MicrophoneEqualizer(
+                    settings: equalizerSettings,
+                    sampleRate: outputFormat.mSampleRate,
+                    channelCount: 1
+                )
+                : nil
 
             try startAudioUnit()
         } catch {
             isRecording = false
             recordingActive.store(false, ordering: .releasing)
+            liveEqualizer = nil
             closeOutputFile()
             recordingURL = nil
             teardownPreparedAudioUnit()
@@ -220,6 +235,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
         logDroppedInputBufferCounters(context: "stop")
 
         closeOutputFile()
+        liveEqualizer = nil
         recordingURL = nil
 
         resetMeters()
@@ -581,6 +597,11 @@ final class CoreAudioRecorder: @unchecked Sendable {
         }
 
         let maxOutputFrames = UInt32(ceil(Double(maxFrames) * (outputFormat.mSampleRate / inputSampleRate))) + 1
+        if maxOutputFrames > equalizerBufferSize {
+            equalizerBuffer?.deallocate()
+            equalizerBuffer = UnsafeMutablePointer<Float32>.allocate(capacity: Int(maxOutputFrames))
+            equalizerBufferSize = maxOutputFrames
+        }
         if maxOutputFrames > conversionBufferSize {
             conversionBuffer?.deallocate()
             conversionBuffer = UnsafeMutablePointer<Int16>.allocate(capacity: Int(maxOutputFrames))
@@ -729,11 +750,18 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private func freeBuffers() {
         drainAudioProcessingQueue()
 
+        if let buffer = equalizerBuffer {
+            buffer.deallocate()
+            equalizerBuffer = nil
+            equalizerBufferSize = 0
+        }
+
         if let buffer = conversionBuffer {
             buffer.deallocate()
             conversionBuffer = nil
             conversionBufferSize = 0
         }
+        liveEqualizer = nil
 
         if let buffer = renderBuffer {
             buffer.deallocate()
@@ -1000,50 +1028,47 @@ final class CoreAudioRecorder: @unchecked Sendable {
         let outputFrameCount = UInt32(Double(frameCount) * ratio)
 
         guard outputFrameCount > 0,
+            let equalizerBuffer,
+            outputFrameCount <= equalizerBufferSize,
             let outputBuffer = conversionBuffer,
             outputFrameCount <= conversionBufferSize
         else { return }
 
-        // Convert Float32 multi-channel → Int16 mono (with sample rate conversion if needed)
+        // Convert to Float32 mono at the transcription sample rate.
         if inputSampleRate == outputSampleRate {
-            // Direct conversion, just format change and channel mixing
-            for i in 0..<Int(frameCount) {
+            for frame in 0..<Int(frameCount) {
                 var sample: Float32 = 0
-                // Mix all channels to mono
-                for ch in 0..<Int(inputChannels) {
-                    sample += inputSamples[i * Int(inputChannels) + ch]
+                for channel in 0..<Int(inputChannels) {
+                    sample += inputSamples[frame * Int(inputChannels) + channel]
                 }
-                sample /= Float32(inputChannels)
-
-                // Convert to Int16 with clipping
-                let scaled = sample * 32767.0
-                let clipped = max(-32768.0, min(32767.0, scaled))
-                outputBuffer[i] = Int16(clipped)
+                equalizerBuffer[frame] = sample / Float32(inputChannels)
             }
         } else {
-            // Sample rate conversion needed - use linear interpolation
-            for i in 0..<Int(outputFrameCount) {
-                let inputIndex = Double(i) / ratio
+            // Sample rate conversion needed - use linear interpolation.
+            for frame in 0..<Int(outputFrameCount) {
+                let inputIndex = Double(frame) / ratio
                 let inputIndexInt = Int(inputIndex)
-                let frac = Float32(inputIndex - Double(inputIndexInt))
+                let fraction = Float32(inputIndex - Double(inputIndexInt))
+                let firstFrame = min(inputIndexInt, Int(frameCount) - 1)
+                let secondFrame = min(inputIndexInt + 1, Int(frameCount) - 1)
 
                 var sample: Float32 = 0
-                let idx1 = min(inputIndexInt, Int(frameCount) - 1)
-                let idx2 = min(inputIndexInt + 1, Int(frameCount) - 1)
-
-                // Mix channels and interpolate
-                for ch in 0..<Int(inputChannels) {
-                    let s1 = inputSamples[idx1 * Int(inputChannels) + ch]
-                    let s2 = inputSamples[idx2 * Int(inputChannels) + ch]
-                    sample += s1 + frac * (s2 - s1)
+                for channel in 0..<Int(inputChannels) {
+                    let firstSample = inputSamples[firstFrame * Int(inputChannels) + channel]
+                    let secondSample = inputSamples[secondFrame * Int(inputChannels) + channel]
+                    sample += firstSample + fraction * (secondSample - firstSample)
                 }
-                sample /= Float32(inputChannels)
-
-                // Convert to Int16
-                let scaled = sample * 32767.0
-                let clipped = max(-32768.0, min(32767.0, scaled))
-                outputBuffer[i] = Int16(clipped)
+                equalizerBuffer[frame] = sample / Float32(inputChannels)
             }
+        }
+
+        // Shape the same signal sent to the file and the streaming callback.
+        liveEqualizer?.process(equalizerBuffer, count: Int(outputFrameCount), channel: 0)
+
+        for frame in 0..<Int(outputFrameCount) {
+            let scaled = equalizerBuffer[frame] * 32767.0
+            let clipped = max(-32768.0, min(32767.0, scaled))
+            outputBuffer[frame] = Int16(clipped)
         }
 
         // Write to file
