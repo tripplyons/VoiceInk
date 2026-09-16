@@ -5,6 +5,7 @@ import Foundation
 struct SpokenPhraseAction: Codable, Equatable, Identifiable {
   enum Operation: String, Codable, CaseIterable {
     case keyboardShortcut
+    case insertText
     case pushStack
     case submitStack
     case resetStack
@@ -15,6 +16,8 @@ struct SpokenPhraseAction: Codable, Equatable, Identifiable {
       switch self {
       case .keyboardShortcut:
         return String(localized: "Run Keyboard Shortcut")
+      case .insertText:
+        return String(localized: "Insert Saved Text")
       case .pushStack:
         return String(localized: "Push Text to Stack")
       case .submitStack:
@@ -40,6 +43,11 @@ struct SpokenPhraseAction: Codable, Equatable, Identifiable {
   var endsDictationAutomatically = false
   var startsNewDictationAutomatically = false
   var operation: Operation = .keyboardShortcut
+  var savedText = ""
+
+  var canRun: Bool {
+    isEnabled && (operation != .insertText || !savedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+  }
 }
 
 extension SpokenPhraseAction {
@@ -51,6 +59,7 @@ extension SpokenPhraseAction {
     case endsDictationAutomatically
     case startsNewDictationAutomatically
     case operation
+    case savedText
   }
 
   init(from decoder: Decoder) throws {
@@ -63,6 +72,7 @@ extension SpokenPhraseAction {
     startsNewDictationAutomatically =
       try container.decodeIfPresent(Bool.self, forKey: .startsNewDictationAutomatically) ?? false
     operation = (try? container.decodeIfPresent(Operation.self, forKey: .operation)) ?? .keyboardShortcut
+    savedText = try container.decodeIfPresent(String.self, forKey: .savedText) ?? ""
   }
 
   func encode(to encoder: Encoder) throws {
@@ -74,6 +84,14 @@ extension SpokenPhraseAction {
     try container.encode(endsDictationAutomatically, forKey: .endsDictationAutomatically)
     try container.encode(startsNewDictationAutomatically, forKey: .startsNewDictationAutomatically)
     try container.encode(operation, forKey: .operation)
+    try container.encode(savedText, forKey: .savedText)
+  }
+}
+
+enum SavedTextInsertion {
+  static func text(_ savedText: String, after dictation: String = "") -> String {
+    let prefix = dictation.trimmingCharacters(in: .whitespacesAndNewlines)
+    return prefix.isEmpty ? savedText : prefix + " " + savedText
   }
 }
 
@@ -98,7 +116,7 @@ enum SpokenPhraseMatcher {
       guard let remainingText = suffixRemainingText(
         in: text,
         matching: action.phrase,
-        allowingExact: false
+        allowingExact: action.operation == .insertText
       ) else {
         continue
       }
@@ -143,7 +161,7 @@ enum SpokenPhraseMatcher {
   }
 
   private static func enabledActions(_ actions: [SpokenPhraseAction]) -> [SpokenPhraseAction] {
-    actions.filter { $0.isEnabled && !normalized($0.phrase).isEmpty }
+    actions.filter { $0.canRun && !normalized($0.phrase).isEmpty }
   }
 
   static func words(in text: String) -> [(value: String, range: Range<String.Index>)] {

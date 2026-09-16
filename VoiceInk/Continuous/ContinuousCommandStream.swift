@@ -9,7 +9,7 @@ struct ContinuousCommandStream {
     mutating func consume(in text: String, actions: [SpokenPhraseAction]) -> [ContinuousVoiceCommandMatch] {
         let words = SpokenPhraseMatcher.words(in: text)
         guard let start = remainingWordIndex(in: words.map(\.value)) else { return [] }
-        let candidates = actions.filter(\.isEnabled).map { action in
+        let candidates = actions.filter(\.canRun).map { action in
             (action: action, words: SpokenPhraseMatcher.words(in: action.phrase).map(\.value))
         }.filter { !$0.words.isEmpty }.sorted { $0.words.count > $1.words.count }
         var results: [ContinuousVoiceCommandMatch] = []
@@ -71,6 +71,7 @@ extension SpokenPhraseAction {
     var continuousCommand: ContinuousVoiceCommand {
         switch operation {
         case .keyboardShortcut: return .runShortcut(shortcut)
+        case .insertText: return .insertText(savedText)
         case .pushStack: return .pushStack
         case .submitStack: return .submitStack
         case .resetStack: return .resetStack

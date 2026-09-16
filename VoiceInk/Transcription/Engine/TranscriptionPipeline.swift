@@ -78,6 +78,7 @@ class TranscriptionPipeline {
         var outputForDelivery: OutputRuntimeConfiguration?
         var responseConfig: EnhancementRuntimeConfiguration?
         var spokenShortcut: Shortcut?
+        var savedText: String?
         var startsNewDictationAfterSpokenShortcut = false
         var continuousCommand: ContinuousVoiceCommand?
 
@@ -158,7 +159,11 @@ class TranscriptionPipeline {
                 let phraseMatch = spokenPhraseMatch(text)
             {
                 text = phraseMatch.remainingText
-                spokenShortcut = phraseMatch.action.shortcut
+                if phraseMatch.action.operation == .insertText {
+                    savedText = phraseMatch.action.savedText
+                } else {
+                    spokenShortcut = phraseMatch.action.shortcut
+                }
                 startsNewDictationAfterSpokenShortcut =
                     phraseMatch.action.startsNewDictationAutomatically
             }
@@ -177,6 +182,7 @@ class TranscriptionPipeline {
             if !assistant.isFollowUp {
                 let shouldRespondInRecorder =
                     continuous == nil
+                    && savedText == nil
                     && resolvedOutputConfiguration.outputMode == .respond
                     && resolvedEnhancementConfiguration?.isEnabled == true
                     && resolvedEnhancementConfiguration.map { configuration in
@@ -192,7 +198,7 @@ class TranscriptionPipeline {
                     !shouldRespondInRecorder && isSkipShortEnhancementEnabled
                     && WordCounter.count(in: text) <= shortEnhancementWordThreshold
 
-                if spokenShortcut == nil,
+                if spokenShortcut == nil, savedText == nil,
                     let enhancementService,
                     let resolvedEnhancementConfiguration,
                     resolvedEnhancementConfiguration.isEnabled,
@@ -289,7 +295,8 @@ class TranscriptionPipeline {
                 responseError: responseError,
                 isAssistantFollowUp: assistant.isFollowUp,
                 spokenShortcut: spokenShortcut,
-                startsNewDictationAfterSpokenShortcut: startsNewDictationAfterSpokenShortcut
+                startsNewDictationAfterSpokenShortcut: startsNewDictationAfterSpokenShortcut,
+                savedText: savedText
             ),
             actions: TranscriptionDelivery.Actions(
                 setState: onStateChange,

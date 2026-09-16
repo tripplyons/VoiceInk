@@ -12,7 +12,7 @@ struct SpokenActionsView: View {
       HStack {
         VStack(alignment: .leading, spacing: 4) {
           Text("Spoken Actions").font(.title2.bold())
-          Text("Map spoken phrases to keyboard and continuous-mode stack actions.")
+          Text("Map spoken phrases to saved text, keyboard shortcuts, and stack actions.")
             .foregroundStyle(.secondary)
         }
         Spacer()
@@ -72,6 +72,11 @@ private struct SpokenActionRow: View {
           if action.operation.usesKeyboardShortcut {
             Text(action.shortcut.displayString)
           }
+          if action.operation == .insertText {
+            Text(action.savedText)
+              .font(.system(.caption, design: .monospaced))
+              .lineLimit(1)
+          }
           if action.endsDictationAutomatically {
             Label("Auto-end", systemImage: "stop.circle")
           }
@@ -123,14 +128,28 @@ private struct SpokenActionEditor: View {
             ActionShortcutRecorder(shortcut: $draft.shortcut)
           }
         }
-        Toggle(
-          "Automatically end dictation when this phrase appears at the end of the preview",
-          isOn: $draft.endsDictationAutomatically)
-        Text("Continuous mode uses auto-end actions as its voice-command vocabulary.")
+        if draft.operation == .insertText {
+          VStack(alignment: .leading, spacing: 6) {
+            Text("Text to insert")
+            TextEditor(text: $draft.savedText)
+              .font(.system(.body, design: .monospaced))
+              .frame(height: 100)
+              .border(.secondary.opacity(0.3))
+              .accessibilityLabel("Text to insert")
+            Text("Pastes exactly this text into the focused app. Does not press Return. In continuous mode, your stack stays queued and recording continues.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        } else {
+          Toggle(
+            "Automatically end dictation when this phrase appears at the end of the preview",
+            isOn: $draft.endsDictationAutomatically)
+        }
+        Text("Continuous mode runs enabled actions without stopping recording. Auto-end and restart settings apply to normal dictation.")
           .font(.caption)
           .foregroundStyle(.secondary)
         Toggle(
-          "Keep listening after running the keyboard shortcut",
+          "Keep listening after running this action",
           isOn: $draft.startsNewDictationAutomatically)
         if draft.operation == .keyboardShortcut && draft.startsNewDictationAutomatically {
           Text("With live transcription and auto-end enabled, only the matched phrase is removed. The key runs without submitting text or restarting the recorder.")
@@ -156,7 +175,11 @@ private struct SpokenActionEditor: View {
           dismiss()
         }
         .buttonStyle(.borderedProminent)
-        .disabled(SpokenPhraseMatcher.normalized(draft.phrase).isEmpty)
+        .disabled(
+          SpokenPhraseMatcher.normalized(draft.phrase).isEmpty
+            || (draft.operation == .insertText
+              && draft.savedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        )
       }
     }
     .padding(24)

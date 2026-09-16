@@ -14,6 +14,7 @@ final class TranscriptionDelivery {
         let isAssistantFollowUp: Bool
         let spokenShortcut: Shortcut?
         let startsNewDictationAfterSpokenShortcut: Bool
+        var savedText: String? = nil
     }
 
     struct Actions {
@@ -33,6 +34,13 @@ final class TranscriptionDelivery {
         if request.isAssistantFollowUp {
             await deliverFollowUp(request, actions: actions)
             return false
+        }
+
+        if let savedText = request.savedText {
+            let text = SavedTextInsertion.text(savedText, after: request.text ?? "")
+            await actions.dismiss()
+            let didInsert = await deliverSavedText(text)
+            return didInsert && request.startsNewDictationAfterSpokenShortcut
         }
 
         if let shortcut = request.spokenShortcut {
@@ -78,6 +86,20 @@ final class TranscriptionDelivery {
             await actions.dismiss()
             return false
         }
+    }
+
+    /// Saved text is literal input to the focused app, independent of output
+    /// routing, trailing-space preferences, and automatic send keys.
+    @discardableResult
+    func deliverSavedText(_ text: String) async -> Bool {
+        let result = await CursorPaster.pasteAtCursorAndWaitUntilPosted(text)
+        if !result.didPostPasteCommand {
+            NotificationManager.shared.showNotification(
+                title: String(localized: "Could not insert saved text. Check Accessibility permission and try again."),
+                type: .error
+            )
+        }
+        return result.didPostPasteCommand
     }
 
     /// Delivers the text accumulated by continuous mode without closing its recorder panel.

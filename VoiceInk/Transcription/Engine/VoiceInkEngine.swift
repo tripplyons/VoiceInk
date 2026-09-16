@@ -272,11 +272,21 @@ class VoiceInkEngine: NSObject, ObservableObject {
         case .submitStack:
             appendToContinuousStack(text)
             _ = await submitContinuousStack(sessionID: sessionID)
+        case .insertText(let savedText):
+            appendToContinuousStack(text)
+            let didInsert = await continuousDelivery.deliverSavedText(savedText)
+            guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return }
+            if !didInsert {
+                // Do not let a queued Return execute unrelated text after a failed paste.
+                continuousCommandQueue.cancel()
+                return
+            }
         case .submitStackAndRunShortcut(let shortcut):
             appendToContinuousStack(text)
+            let wasEmpty = continuousStack.isEmpty
             let didSubmit = await submitContinuousStack(sessionID: sessionID)
             guard isContinuousModeEnabled, continuousModeSessionID == sessionID else { return }
-            if didSubmit {
+            if wasEmpty || didSubmit {
                 _ = SpokenShortcutRunner.run(shortcut)
             }
         case .pushStack, .runShortcut, nil:
@@ -854,6 +864,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
     private func handleSpokenActionPreview(_ text: String, startID: UUID) {
         let normalActions = SpokenPhraseActionStore.shared.actions.filter {
             $0.operation == .keyboardShortcut || $0.operation == .submitStackAndKeyboardShortcut
+                || $0.operation == .insertText
         }
         guard spokenPhraseTriggerDetector.matchPreview(text, actions: normalActions) != nil else { return }
         Task { @MainActor [weak self] in
@@ -871,7 +882,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
             in: text, actions: SpokenPhraseActionStore.shared.actions
         )
         for match in matches {
-            logger.debug("Continuous command queued: \(String(describing: match.command), privacy: .public)")
+            logger.debug("Continuous command queued: \(match.command.logName, privacy: .public)")
             continuousCommandQueue.enqueue { [weak self] in
                 guard let self, self.isContinuousModeEnabled,
                     self.continuousModeSessionID == sessionID
@@ -885,7 +896,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
                 }
                 guard !Task.isCancelled else { return }
                 await self.handleContinuousSegment(processedText, command: match.command, sessionID: sessionID)
-                self.logger.debug("Continuous command finished: \(String(describing: match.command), privacy: .public)")
+                self.logger.debug("Continuous command finished: \(match.command.logName, privacy: .public)")
             }
         }
         return continuousCommandStream.remainingText(in: text)
@@ -930,6 +941,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
     private func resolveSpokenPhrase(in text: String) -> SpokenPhraseMatch? {
         let actions = SpokenPhraseActionStore.shared.actions.filter {
             $0.operation == .keyboardShortcut || $0.operation == .submitStackAndKeyboardShortcut
+                || $0.operation == .insertText
         }
         if let triggeredActionID = spokenPhraseTriggerDetector.triggeredActionID,
             let match = SpokenPhraseMatcher.removingSuffix(

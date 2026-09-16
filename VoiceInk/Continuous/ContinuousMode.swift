@@ -7,7 +7,20 @@ enum ContinuousVoiceCommand: Equatable {
     case resetStack
     case exitContinuousMode
     case runShortcut(Shortcut)
+    case insertText(String)
     case submitStackAndRunShortcut(Shortcut)
+
+    var logName: String {
+        switch self {
+        case .pushStack: return "pushStack"
+        case .submitStack: return "submitStack"
+        case .resetStack: return "resetStack"
+        case .exitContinuousMode: return "exitContinuousMode"
+        case .runShortcut: return "runShortcut"
+        case .insertText: return "insertText"
+        case .submitStackAndRunShortcut: return "submitStackAndRunShortcut"
+        }
+    }
 }
 
 struct ContinuousVoiceCommandMatch: Equatable {
@@ -46,7 +59,7 @@ enum ContinuousVoiceCommandMatcher {
         let continuousActions = actions
             .enumerated()
             .filter {
-                $0.element.isEnabled
+                $0.element.canRun
                     && ($0.element.operation != .keyboardShortcut || $0.element.endsDictationAutomatically)
             }
             .sorted { lhs, rhs in
