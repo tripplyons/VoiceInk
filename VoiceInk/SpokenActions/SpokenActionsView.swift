@@ -72,6 +72,9 @@ private struct SpokenActionRow: View {
           if action.endsDictationAutomatically {
             Label("Auto-end", systemImage: "stop.circle")
           }
+          if action.startsNewDictationAutomatically {
+            Label("Start next", systemImage: "arrow.clockwise.circle")
+          }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -113,6 +116,9 @@ private struct SpokenActionEditor: View {
         Toggle(
           "Automatically end dictation when this phrase appears at the end of the preview",
           isOn: $draft.endsDictationAutomatically)
+        Toggle(
+          "Start a new dictation after running the keyboard shortcut",
+          isOn: $draft.startsNewDictationAutomatically)
         Toggle("Enabled", isOn: $draft.isEnabled)
       }
       HStack {

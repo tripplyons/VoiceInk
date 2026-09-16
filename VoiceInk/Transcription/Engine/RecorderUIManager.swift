@@ -27,6 +27,7 @@ enum RecorderPanelStyle: String, CaseIterable, Identifiable {
 protocol RecorderPanelPresenting: AnyObject {
     var isRecorderPanelVisible: Bool { get }
     func dismissRecorderPanel() async
+    func startNewDictation() async
 }
 
 @MainActor
@@ -194,6 +195,14 @@ class RecorderUIManager: ObservableObject, RecorderPanelPresenting {
         hideRecorderPanel()
         isRecorderPanelVisible = false
         engine.assistantSession.reset()
+    }
+
+    func startNewDictation() async {
+        guard let engine, engine.recordingState == .idle else { return }
+
+        SoundManager.shared.playStartSound()
+        isRecorderPanelVisible = true
+        await engine.toggleRecord()
     }
 
     func resetOnLaunch() async {

@@ -8,6 +8,39 @@ struct SpokenPhraseAction: Codable, Equatable, Identifiable {
   var shortcut: Shortcut
   var isEnabled = true
   var endsDictationAutomatically = false
+  var startsNewDictationAutomatically = false
+}
+
+extension SpokenPhraseAction {
+  private enum CodingKeys: String, CodingKey {
+    case id
+    case phrase
+    case shortcut
+    case isEnabled
+    case endsDictationAutomatically
+    case startsNewDictationAutomatically
+  }
+
+  init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    id = try container.decode(UUID.self, forKey: .id)
+    phrase = try container.decode(String.self, forKey: .phrase)
+    shortcut = try container.decode(Shortcut.self, forKey: .shortcut)
+    isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+    endsDictationAutomatically = try container.decode(Bool.self, forKey: .endsDictationAutomatically)
+    startsNewDictationAutomatically =
+      try container.decodeIfPresent(Bool.self, forKey: .startsNewDictationAutomatically) ?? false
+  }
+
+  func encode(to encoder: Encoder) throws {
+    var container = encoder.container(keyedBy: CodingKeys.self)
+    try container.encode(id, forKey: .id)
+    try container.encode(phrase, forKey: .phrase)
+    try container.encode(shortcut, forKey: .shortcut)
+    try container.encode(isEnabled, forKey: .isEnabled)
+    try container.encode(endsDictationAutomatically, forKey: .endsDictationAutomatically)
+    try container.encode(startsNewDictationAutomatically, forKey: .startsNewDictationAutomatically)
+  }
 }
 
 struct SpokenPhraseMatch: Equatable {

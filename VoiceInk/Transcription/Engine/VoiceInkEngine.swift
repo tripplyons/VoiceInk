@@ -531,7 +531,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
         let transcriptionID = transcription.id
         activePipelineTranscriptionID = transcriptionID
 
-        await pipeline.run(
+        let shouldStartNewDictation = await pipeline.run(
             transcription: transcription,
             audioURL: audioURL,
             transcriptionConfiguration: transcriptionConfiguration,
@@ -628,6 +628,10 @@ class VoiceInkEngine: NSObject, ObservableObject {
             && (recordingState == .transcribing || recordingState == .enhancing || recordingState == .busy)
         {
             recordingState = .idle
+        }
+
+        if didFinishActivePipeline && shouldStartNewDictation {
+            await recorderUIManager?.startNewDictation()
         }
     }
 

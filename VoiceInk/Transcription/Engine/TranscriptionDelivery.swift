@@ -13,6 +13,7 @@ final class TranscriptionDelivery {
         let responseError: String?
         let isAssistantFollowUp: Bool
         let spokenShortcut: Shortcut?
+        let startsNewDictationAfterSpokenShortcut: Bool
     }
 
     struct Actions {
@@ -23,56 +24,59 @@ final class TranscriptionDelivery {
         let failResponse: (String) async -> Void
     }
 
-    func deliver(_ request: Request, actions: Actions) async {
+    func deliver(_ request: Request, actions: Actions) async -> Bool {
         guard request.transcription.transcriptionStatus == TranscriptionStatus.completed.rawValue else {
             await actions.dismiss()
-            return
+            return false
         }
 
         if request.isAssistantFollowUp {
             await deliverFollowUp(request, actions: actions)
-            return
+            return false
         }
 
         if let shortcut = request.spokenShortcut {
             if let text = request.text?.trimmingCharacters(in: .whitespacesAndNewlines),
                 !text.isEmpty
             {
-                await paste(
+                return await paste(
                     text,
                     output: request.output,
                     spokenShortcut: shortcut,
+                    startsNewDictationAfterSpokenShortcut: request.startsNewDictationAfterSpokenShortcut,
                     actions: actions
                 )
             } else {
                 SoundManager.shared.playStopSound()
                 await actions.dismiss()
-                SpokenShortcutRunner.run(shortcut)
+                let didRunShortcut = SpokenShortcutRunner.run(shortcut)
+                return didRunShortcut && request.startsNewDictationAfterSpokenShortcut
             }
-            return
         }
 
         if request.output.outputMode == .respond,
             request.responseConfig != nil || request.responseError != nil
         {
             await deliverResponse(request, actions: actions)
-            return
+            return false
         }
 
         if request.output.outputMode == .customCommand {
             await deliverCustomCommand(request, actions: actions)
-            return
+            return false
         }
 
         if let text = request.text {
-            await paste(
+            return await paste(
                 text,
                 output: request.output,
                 spokenShortcut: request.spokenShortcut,
+                startsNewDictationAfterSpokenShortcut: false,
                 actions: actions
             )
         } else {
             await actions.dismiss()
+            return false
         }
     }
 
@@ -182,8 +186,9 @@ final class TranscriptionDelivery {
         _ text: String,
         output: OutputRuntimeConfiguration,
         spokenShortcut: Shortcut?,
+        startsNewDictationAfterSpokenShortcut: Bool,
         actions: Actions
-    ) async {
+    ) async -> Bool {
         let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace") && spokenShortcut == nil
         let pastedText = text + (appendSpace ? " " : "")
         let autoSendKey = output.outputMode == .paste ? output.autoSendKey : .none
@@ -192,6 +197,14 @@ final class TranscriptionDelivery {
         await actions.dismiss()
 
         let pasteTask = CursorPaster.startPasteAtCursor(pastedText)
+
+        if let spokenShortcut, startsNewDictationAfterSpokenShortcut {
+            let pasteResult = await pasteTask.value
+            guard pasteResult.didPostPasteCommand else { return false }
+
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            return SpokenShortcutRunner.run(spokenShortcut)
+        }
 
         Task { @MainActor in
             let pasteResult = await pasteTask.value
@@ -205,5 +218,6 @@ final class TranscriptionDelivery {
                 CursorPaster.performAutoSend(autoSendKey)
             }
         }
+        return false
     }
 }

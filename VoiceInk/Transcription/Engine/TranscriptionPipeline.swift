@@ -64,13 +64,14 @@ class TranscriptionPipeline {
         onCancel: @escaping () async -> Void,
         onDismiss: @escaping () async -> Void,
         assistant: AssistantHooks = .inactive
-    ) async {
+    ) async -> Bool {
         let model = transcriptionConfiguration.model
         var finalText: String?
         var responseError: String?
         var outputForDelivery: OutputRuntimeConfiguration?
         var responseConfig: EnhancementRuntimeConfiguration?
         var spokenShortcut: Shortcut?
+        var startsNewDictationAfterSpokenShortcut = false
 
         func finishCanceledTranscription() async {
             await onCancel()
@@ -92,7 +93,7 @@ class TranscriptionPipeline {
 
         if shouldCancel() {
             await finishCanceledTranscription()
-            return
+            return false
         }
 
         do {
@@ -112,7 +113,7 @@ class TranscriptionPipeline {
 
             if shouldCancel() {
                 await finishCanceledTranscription()
-                return
+                return false
             }
 
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -139,6 +140,8 @@ class TranscriptionPipeline {
             if !assistant.isFollowUp, let phraseMatch = spokenPhraseMatch(text) {
                 text = phraseMatch.remainingText
                 spokenShortcut = phraseMatch.action.shortcut
+                startsNewDictationAfterSpokenShortcut =
+                    phraseMatch.action.startsNewDictationAutomatically
             }
             let cleanedText = text
 
@@ -178,7 +181,7 @@ class TranscriptionPipeline {
                 {
                     if shouldCancel() {
                         await finishCanceledTranscription()
-                        return
+                        return false
                     }
 
                     onStateChange(.enhancing)
@@ -216,7 +219,7 @@ class TranscriptionPipeline {
                         }
                         if shouldCancel() {
                             await finishCanceledTranscription()
-                            return
+                            return false
                         }
                     }
                 }
@@ -244,10 +247,10 @@ class TranscriptionPipeline {
 
         if shouldCancel() {
             await finishCanceledTranscription()
-            return
+            return false
         }
 
-        await delivery.deliver(
+        return await delivery.deliver(
             TranscriptionDelivery.Request(
                 transcription: transcription,
                 text: finalText,
@@ -255,7 +258,8 @@ class TranscriptionPipeline {
                 responseConfig: responseConfig,
                 responseError: responseError,
                 isAssistantFollowUp: assistant.isFollowUp,
-                spokenShortcut: spokenShortcut
+                spokenShortcut: spokenShortcut,
+                startsNewDictationAfterSpokenShortcut: startsNewDictationAfterSpokenShortcut
             ),
             actions: TranscriptionDelivery.Actions(
                 setState: onStateChange,

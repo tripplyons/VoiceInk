@@ -56,6 +56,28 @@ struct VoiceInkTests {
         #expect(SpokenPhraseActionStore(defaults: defaults).actions.isEmpty)
     }
 
+    @Test func spokenPhraseActionPersistsStartingANewDictation() throws {
+        var action = phraseAction("send and continue")
+        action.startsNewDictationAutomatically = true
+
+        let data = try JSONEncoder().encode(action)
+        let decoded = try JSONDecoder().decode(SpokenPhraseAction.self, from: data)
+
+        #expect(decoded == action)
+    }
+
+    @Test func spokenPhraseActionDefaultsNewDictationToOffForExistingData() throws {
+        let action = phraseAction("send")
+        let data = try JSONEncoder().encode(action)
+        var object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        object.removeValue(forKey: "startsNewDictationAutomatically")
+        let existingData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(SpokenPhraseAction.self, from: existingData)
+
+        #expect(!decoded.startsNewDictationAutomatically)
+    }
+
     private func phraseAction(_ phrase: String, autoEnd: Bool = false) -> SpokenPhraseAction {
         SpokenPhraseAction(
             phrase: phrase,
