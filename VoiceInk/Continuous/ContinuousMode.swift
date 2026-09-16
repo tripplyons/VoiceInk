@@ -75,23 +75,7 @@ enum ContinuousVoiceCommandMatcher {
                 continue
             }
 
-            let command: ContinuousVoiceCommand
-            switch action.operation {
-            case .keyboardShortcut:
-                command = .runShortcut(action.shortcut)
-            case .pushStack:
-                command = .pushStack
-            case .submitStack:
-                command = .submitStack
-            case .resetStack:
-                command = .resetStack
-            case .exitContinuousMode:
-                command = .exitContinuousMode
-            case .submitStackAndKeyboardShortcut:
-                command = .submitStackAndRunShortcut(action.shortcut)
-            }
-
-            return ContinuousVoiceCommandMatch(command: command, remainingText: remainingText)
+            return ContinuousVoiceCommandMatch(command: action.continuousCommand, remainingText: remainingText)
         }
 
         return nil
