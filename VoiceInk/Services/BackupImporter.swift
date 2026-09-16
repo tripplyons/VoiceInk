@@ -184,6 +184,12 @@ enum BackupImporter {
         if let clipboardDelay = general.clipboardRestoreDelay {
             UserDefaults.standard.set(clipboardDelay, forKey: "clipboardRestoreDelay")
         }
+        if let spokenSubmitEnabled = general.spokenSubmitEnabled {
+            UserDefaults.standard.set(spokenSubmitEnabled, forKey: UserDefaults.Keys.spokenSubmitEnabled)
+        }
+        if let spokenSubmitPhrase = general.spokenSubmitPhrase {
+            UserDefaults.standard.set(spokenSubmitPhrase, forKey: UserDefaults.Keys.spokenSubmitPhrase)
+        }
 
         print("Successfully imported general settings.")
     }

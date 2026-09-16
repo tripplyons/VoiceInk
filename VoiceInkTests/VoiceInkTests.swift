@@ -4,6 +4,37 @@ import Testing
 @testable import VoiceInk
 
 struct VoiceInkTests {
+    @Test func spokenSubmitMatchesPhraseAtEndAndRemovesIt() {
+        let command = SpokenSubmitCommand.match(
+            text: "Send this message press enter.",
+            phrase: "press enter"
+        )
+
+        #expect(command == SpokenSubmitCommand(textToPaste: "Send this message"))
+    }
+
+    @Test func spokenSubmitIgnoresCaseAndTrailingWhitespace() {
+        let command = SpokenSubmitCommand.match(
+            text: "Send this message PRESS ENTER   ",
+            phrase: "press enter"
+        )
+
+        #expect(command == SpokenSubmitCommand(textToPaste: "Send this message"))
+    }
+
+    @Test func spokenSubmitRequiresACompleteTrailingPhrase() {
+        #expect(SpokenSubmitCommand.match(text: "Do not press enter yet", phrase: "press enter") == nil)
+        #expect(SpokenSubmitCommand.match(text: "impress enter", phrase: "press enter") == nil)
+        #expect(SpokenSubmitCommand.match(text: "press enter", phrase: "") == nil)
+    }
+
+    @Test func spokenSubmitCanSubmitWithoutPastedText() {
+        #expect(
+            SpokenSubmitCommand.match(text: "press enter!", phrase: "press enter")
+                == SpokenSubmitCommand(textToPaste: "")
+        )
+    }
+
     @Test func peakNormalizesQuietAudioFile() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)

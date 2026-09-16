@@ -155,22 +155,31 @@ final class TranscriptionDelivery {
     }
 
     private func paste(_ text: String, output: OutputRuntimeConfiguration, actions: Actions) async {
-        let textToPaste = text
-        let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
+        let defaults = UserDefaults.standard
+        let spokenSubmit = output.outputMode == .paste && defaults.bool(forKey: UserDefaults.Keys.spokenSubmitEnabled)
+            ? SpokenSubmitCommand.match(
+                text: text,
+                phrase: defaults.string(forKey: UserDefaults.Keys.spokenSubmitPhrase) ?? ""
+            )
+            : nil
+        let textToPaste = spokenSubmit?.textToPaste ?? text
+        let appendSpace = defaults.bool(forKey: "AppendTrailingSpace") && spokenSubmit == nil
         let pastedText = textToPaste + (appendSpace ? " " : "")
+        let autoSendKey: AutoSendKey = spokenSubmit == nil
+            ? (output.outputMode == .paste ? output.autoSendKey : .none)
+            : .enter
+
         SoundManager.shared.playStopSound()
         await actions.dismiss()
 
         let pasteTask = CursorPaster.startPasteAtCursor(pastedText)
 
-        let autoSendKey = output.outputMode == .paste ? output.autoSendKey : .none
         Task { @MainActor in
-            _ = await pasteTask.value
+            let pasteResult = await pasteTask.value
+            guard pasteResult.didPostPasteCommand, autoSendKey.isEnabled else { return }
 
-            if autoSendKey.isEnabled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                CursorPaster.performAutoSend(autoSendKey)
-            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            CursorPaster.performAutoSend(autoSendKey)
         }
     }
 }

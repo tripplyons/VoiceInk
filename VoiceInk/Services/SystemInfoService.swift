@@ -58,6 +58,8 @@ final class SystemInfoService {
             Restore Clipboard After Paste: \(UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste"))
             Clipboard Restore Delay: \(UserDefaults.standard.double(forKey: "clipboardRestoreDelay"))s
             Paste Method: \(PasteMethod.current().displayName)
+            Spoken Submit: \(UserDefaults.standard.bool(forKey: UserDefaults.Keys.spokenSubmitEnabled))
+            Spoken Submit Phrase: \(UserDefaults.standard.string(forKey: UserDefaults.Keys.spokenSubmitPhrase) ?? "")
 
             DATA CLEANUP SETTINGS:
 

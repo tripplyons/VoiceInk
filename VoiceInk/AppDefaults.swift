@@ -15,6 +15,8 @@ enum AppDefaults {
             "restoreClipboardAfterPaste": true,
             "clipboardRestoreDelay": 2.0,
             "useAppleScriptPaste": false,
+            UserDefaults.Keys.spokenSubmitEnabled: false,
+            UserDefaults.Keys.spokenSubmitPhrase: "press enter",
 
             // Audio & Media
             "isSystemMuteEnabled": true,
