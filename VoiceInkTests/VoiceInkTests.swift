@@ -81,9 +81,9 @@ struct VoiceInkTests {
         store.reset()
 
         #expect(store.settings.isEnabled)
-        #expect(store.settings.highPassFrequency == 90)
-        #expect(store.settings.bandGains == [-3.5, 1.5, 2.5, -1, -1.5, -2.5])
-        #expect(store.settings.lowPassFrequency == 6_600)
+        #expect(store.settings.highPassFrequency == 110)
+        #expect(store.settings.bandGains == [-9.5, -6.5, -3.5, -1, 1, 6, 6])
+        #expect(store.settings.lowPassFrequency == 7_800)
     }
 
     @MainActor

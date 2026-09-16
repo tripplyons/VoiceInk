@@ -2,10 +2,10 @@ import Combine
 import Foundation
 
 struct MicrophoneEqualizerSettings: Codable, Equatable, Sendable {
-    static let bandFrequencies: [Float] = [125, 250, 500, 1_000, 2_000, 4_000]
-    static let defaultHighPassFrequency: Float = 90
-    static let defaultBandGains: [Float] = [-3.5, 1.5, 2.5, -1, -1.5, -2.5]
-    static let defaultLowPassFrequency: Float = 6_600
+    static let bandFrequencies: [Float] = [125, 250, 500, 1_000, 2_000, 4_000, 6_000]
+    static let defaultHighPassFrequency: Float = 110
+    static let defaultBandGains: [Float] = [-9.5, -6.5, -3.5, -1, 1, 6, 6]
+    static let defaultLowPassFrequency: Float = 7_800
     static let highPassRange: ClosedRange<Float> = 40...300
     static let lowPassRange: ClosedRange<Float> = 3_000...7_800
     static let gainRange: ClosedRange<Float> = -12...12
@@ -35,10 +35,7 @@ struct MicrophoneEqualizerSettings: Codable, Equatable, Sendable {
         let gains = bandGains.prefix(Self.bandFrequencies.count).map {
             $0.clamped(to: Self.gainRange)
         }
-        bandGains = gains + Array(
-            repeating: 0,
-            count: max(0, Self.bandFrequencies.count - gains.count)
-        )
+        bandGains = gains + Self.defaultBandGains.dropFirst(gains.count)
     }
 
     private enum CodingKeys: String, CodingKey {
