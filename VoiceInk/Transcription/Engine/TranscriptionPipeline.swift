@@ -55,6 +55,7 @@ class TranscriptionPipeline {
         formattingConfiguration resolveFormattingConfiguration: @escaping () -> TranscriptionFormattingConfiguration,
         session: TranscriptionSession?,
         triggerWordModeSelection: @escaping (String) -> String? = { _ in nil },
+        spokenPhraseMatch: @escaping (String) -> SpokenPhraseMatch? = { _ in nil },
         enhancementConfiguration: @escaping () -> EnhancementRuntimeConfiguration?,
         recordingContextSnapshot: @escaping () async -> RecordingContextSnapshot? = { nil },
         outputConfiguration: @escaping () -> OutputRuntimeConfiguration,
@@ -69,6 +70,7 @@ class TranscriptionPipeline {
         var responseError: String?
         var outputForDelivery: OutputRuntimeConfiguration?
         var responseConfig: EnhancementRuntimeConfiguration?
+        var spokenShortcut: Shortcut?
 
         func finishCanceledTranscription() async {
             await onCancel()
@@ -134,6 +136,10 @@ class TranscriptionPipeline {
             }
 
             text = WordReplacementService.shared.applyReplacements(to: text, using: modelContext)
+            if !assistant.isFollowUp, let phraseMatch = spokenPhraseMatch(text) {
+                text = phraseMatch.remainingText
+                spokenShortcut = phraseMatch.action.shortcut
+            }
             let cleanedText = text
 
             let actualDuration = await AudioFileMetadata.duration(for: audioURL)
@@ -163,7 +169,8 @@ class TranscriptionPipeline {
                     !shouldRespondInRecorder && isSkipShortEnhancementEnabled
                     && WordCounter.count(in: text) <= shortEnhancementWordThreshold
 
-                if let enhancementService,
+                if spokenShortcut == nil,
+                    let enhancementService,
                     let resolvedEnhancementConfiguration,
                     resolvedEnhancementConfiguration.isEnabled,
                     enhancementService.isConfigured(for: resolvedEnhancementConfiguration),
@@ -247,7 +254,8 @@ class TranscriptionPipeline {
                 output: outputForDelivery ?? outputConfiguration(),
                 responseConfig: responseConfig,
                 responseError: responseError,
-                isAssistantFollowUp: assistant.isFollowUp
+                isAssistantFollowUp: assistant.isFollowUp,
+                spokenShortcut: spokenShortcut
             ),
             actions: TranscriptionDelivery.Actions(
                 setState: onStateChange,

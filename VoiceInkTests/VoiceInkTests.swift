@@ -4,34 +4,63 @@ import Testing
 @testable import VoiceInk
 
 struct VoiceInkTests {
-    @Test func spokenSubmitMatchesPhraseAtEndAndRemovesIt() {
-        let command = SpokenSubmitCommand.match(
-            text: "Send this message press enter.",
-            phrase: "press enter"
-        )
-
-        #expect(command == SpokenSubmitCommand(textToPaste: "Send this message"))
+    @Test func spokenPhraseNormalizationIgnoresCasePunctuationAndWhitespace() {
+        #expect(SpokenPhraseMatcher.normalized("  Re-Phrase, THIS! ") == "re phrase this")
     }
 
-    @Test func spokenSubmitIgnoresCaseAndTrailingWhitespace() {
-        let command = SpokenSubmitCommand.match(
-            text: "Send this message PRESS ENTER   ",
-            phrase: "press enter"
-        )
-
-        #expect(command == SpokenSubmitCommand(textToPaste: "Send this message"))
+    @Test func spokenPhraseExactMatchRequiresTheWholeTranscription() {
+        let action = phraseAction("Rephrase this")
+        #expect(SpokenPhraseMatcher.exactMatch(in: "rephrase this!", actions: [action]) == action)
+        #expect(SpokenPhraseMatcher.exactMatch(in: "please rephrase this", actions: [action]) == nil)
     }
 
-    @Test func spokenSubmitRequiresACompleteTrailingPhrase() {
-        #expect(SpokenSubmitCommand.match(text: "Do not press enter yet", phrase: "press enter") == nil)
-        #expect(SpokenSubmitCommand.match(text: "impress enter", phrase: "press enter") == nil)
-        #expect(SpokenSubmitCommand.match(text: "press enter", phrase: "") == nil)
+    @Test func spokenPhraseSuffixMatchRemovesTheTrigger() {
+        let action = phraseAction("send it", autoEnd: true)
+        let match = SpokenPhraseMatcher.suffixMatch(in: "This is ready. SEND IT!", actions: [action])
+        #expect(match == SpokenPhraseMatch(action: action, remainingText: "This is ready"))
     }
 
-    @Test func spokenSubmitCanSubmitWithoutPastedText() {
-        #expect(
-            SpokenSubmitCommand.match(text: "press enter!", phrase: "press enter")
-                == SpokenSubmitCommand(textToPaste: "")
+    @Test func spokenPhraseSuffixNeedsAnEnabledAutoEndAction() {
+        var action = phraseAction("send it")
+        #expect(SpokenPhraseMatcher.suffixMatch(in: "Text send it", actions: [action]) == nil)
+        action.endsDictationAutomatically = true
+        action.isEnabled = false
+        #expect(SpokenPhraseMatcher.suffixMatch(in: "Text send it", actions: [action]) == nil)
+    }
+
+    @Test func spokenPhraseSuffixDoesNotMatchAPartialWord() {
+        let action = phraseAction("finish", autoEnd: true)
+        #expect(SpokenPhraseMatcher.suffixMatch(in: "Draft fin", actions: [action]) == nil)
+        #expect(SpokenPhraseMatcher.suffixMatch(in: "Draft finishing", actions: [action]) == nil)
+    }
+
+    @Test func spokenPhraseTriggerDetectorFiresOnlyOnceUntilReset() {
+        let action = phraseAction("finish", autoEnd: true)
+        var detector = SpokenPhraseTriggerDetector()
+        #expect(detector.matchPreview("Draft finish", actions: [action]) != nil)
+        #expect(detector.matchPreview("Draft finish", actions: [action]) == nil)
+        detector.reset()
+        #expect(detector.matchPreview("Another finish", actions: [action]) != nil)
+    }
+
+    @MainActor
+    @Test func spokenPhraseStorePersistsUpdatesAndRemoval() throws {
+        let suite = "SpokenPhraseActionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let action = phraseAction("archive")
+        let store = SpokenPhraseActionStore(defaults: defaults)
+        store.add(action)
+        #expect(SpokenPhraseActionStore(defaults: defaults).actions == [action])
+        store.remove(id: action.id)
+        #expect(SpokenPhraseActionStore(defaults: defaults).actions.isEmpty)
+    }
+
+    private func phraseAction(_ phrase: String, autoEnd: Bool = false) -> SpokenPhraseAction {
+        SpokenPhraseAction(
+            phrase: phrase,
+            shortcut: .key(keyCode: 36, modifierFlags: [.command]),
+            endsDictationAutomatically: autoEnd
         )
     }
 

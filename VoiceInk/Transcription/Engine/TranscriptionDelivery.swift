@@ -12,6 +12,7 @@ final class TranscriptionDelivery {
         let responseConfig: EnhancementRuntimeConfiguration?
         let responseError: String?
         let isAssistantFollowUp: Bool
+        let spokenShortcut: Shortcut?
     }
 
     struct Actions {
@@ -33,6 +34,24 @@ final class TranscriptionDelivery {
             return
         }
 
+        if let shortcut = request.spokenShortcut {
+            if let text = request.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !text.isEmpty
+            {
+                await paste(
+                    text,
+                    output: request.output,
+                    spokenShortcut: shortcut,
+                    actions: actions
+                )
+            } else {
+                SoundManager.shared.playStopSound()
+                await actions.dismiss()
+                SpokenShortcutRunner.run(shortcut)
+            }
+            return
+        }
+
         if request.output.outputMode == .respond,
             request.responseConfig != nil || request.responseError != nil
         {
@@ -46,7 +65,12 @@ final class TranscriptionDelivery {
         }
 
         if let text = request.text {
-            await paste(text, output: request.output, actions: actions)
+            await paste(
+                text,
+                output: request.output,
+                spokenShortcut: request.spokenShortcut,
+                actions: actions
+            )
         } else {
             await actions.dismiss()
         }
@@ -154,20 +178,15 @@ final class TranscriptionDelivery {
         String(format: "%.3f", duration)
     }
 
-    private func paste(_ text: String, output: OutputRuntimeConfiguration, actions: Actions) async {
-        let defaults = UserDefaults.standard
-        let spokenSubmit = output.outputMode == .paste && defaults.bool(forKey: UserDefaults.Keys.spokenSubmitEnabled)
-            ? SpokenSubmitCommand.match(
-                text: text,
-                phrase: defaults.string(forKey: UserDefaults.Keys.spokenSubmitPhrase) ?? ""
-            )
-            : nil
-        let textToPaste = spokenSubmit?.textToPaste ?? text
-        let appendSpace = defaults.bool(forKey: "AppendTrailingSpace") && spokenSubmit == nil
-        let pastedText = textToPaste + (appendSpace ? " " : "")
-        let autoSendKey: AutoSendKey = spokenSubmit == nil
-            ? (output.outputMode == .paste ? output.autoSendKey : .none)
-            : .enter
+    private func paste(
+        _ text: String,
+        output: OutputRuntimeConfiguration,
+        spokenShortcut: Shortcut?,
+        actions: Actions
+    ) async {
+        let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace") && spokenShortcut == nil
+        let pastedText = text + (appendSpace ? " " : "")
+        let autoSendKey = output.outputMode == .paste ? output.autoSendKey : .none
 
         SoundManager.shared.playStopSound()
         await actions.dismiss()
@@ -176,10 +195,15 @@ final class TranscriptionDelivery {
 
         Task { @MainActor in
             let pasteResult = await pasteTask.value
-            guard pasteResult.didPostPasteCommand, autoSendKey.isEnabled else { return }
+            guard pasteResult.didPostPasteCommand else { return }
 
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            CursorPaster.performAutoSend(autoSendKey)
+            if let spokenShortcut {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                SpokenShortcutRunner.run(spokenShortcut)
+            } else if autoSendKey.isEnabled {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                CursorPaster.performAutoSend(autoSendKey)
+            }
         }
     }
 }

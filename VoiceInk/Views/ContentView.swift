@@ -8,6 +8,7 @@ enum ViewType: String, CaseIterable, Identifiable {
     case transcribeAudio = "Transcribe Audio"
     case audio = "Audio"
     case dictionary = "Dictionary"
+    case spokenActions = "Spoken Actions"
     case settings = "Settings"
 
     var id: String { rawValue }
@@ -95,6 +96,8 @@ struct ContentView: View {
             DictionarySettingsView()
         case .modes:
             ModeView()
+        case .spokenActions:
+            SpokenActionsView()
         case .settings:
             SettingsView()
         }

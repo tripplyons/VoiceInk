@@ -90,8 +90,7 @@ struct GeneralBackup: Codable {
     let isExperimentalFeaturesEnabled: Bool?
     let restoreClipboardAfterPaste: Bool?
     let clipboardRestoreDelay: Double?
-    let spokenSubmitEnabled: Bool?
-    let spokenSubmitPhrase: String?
+    let spokenPhraseActions: [SpokenPhraseAction]?
 }
 
 struct WordBackup: Codable {

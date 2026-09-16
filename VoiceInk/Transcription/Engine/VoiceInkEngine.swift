@@ -105,6 +105,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
     private var activeRecordingContextStore: RecordingContextSnapshotStore?
     private var activeRecordingContextTasks: [Task<Void, Never>] = []
     private var voiceInkRefinePreparationTask: Task<Void, Never>?
+    private var spokenPhraseTriggerDetector = SpokenPhraseTriggerDetector()
 
     let recorder = Recorder()
     var recordedFile: URL? = nil
@@ -224,6 +225,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
             shouldCancelRecording = false
             partialTranscript = ""
             activeRecordingUseCase = recordingUseCase
+            spokenPhraseTriggerDetector.reset()
             clearActiveRecordingContext()
 
             if !recordingUseCase.isAssistantFollowUp {
@@ -325,6 +327,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
                                                 return
                                             }
                                             self.partialTranscript = partial
+                                            self.handleSpokenActionPreview(partial, startID: startID)
                                         }
                                     }
                                 )
@@ -539,6 +542,9 @@ class VoiceInkEngine: NSObject, ObservableObject {
             triggerWordModeSelection: { [weak self] text in
                 self?.selectTriggerWordModeIfNeeded(for: text)
             },
+            spokenPhraseMatch: { [weak self] text in
+                self?.resolveSpokenPhrase(in: text)
+            },
             enhancementConfiguration: { [weak self] in
                 guard let self,
                     let enhancementService = self.enhancementService,
@@ -613,6 +619,7 @@ class VoiceInkEngine: NSObject, ObservableObject {
             recordedFile = nil
             shouldCancelRecording = false
             activePipelineUseCase = .newSession
+            spokenPhraseTriggerDetector.reset()
             clearActiveRecordingContext()
         }
         canceledPipelineTranscriptionIDs.remove(transcriptionID)
@@ -631,6 +638,36 @@ class VoiceInkEngine: NSObject, ObservableObject {
 
         ModeManager.shared.setActiveConfiguration(triggeredMode)
         return processedText
+    }
+
+    private func handleSpokenActionPreview(_ text: String, startID: UUID) {
+        guard spokenPhraseTriggerDetector.matchPreview(
+            text,
+            actions: SpokenPhraseActionStore.shared.actions
+        ) != nil else { return }
+        Task { @MainActor [weak self] in
+            guard let self,
+                self.activeRecordingStartID == startID,
+                self.recordingState == .recording
+            else { return }
+            await self.toggleRecord()
+        }
+    }
+
+    private func resolveSpokenPhrase(in text: String) -> SpokenPhraseMatch? {
+        let actions = SpokenPhraseActionStore.shared.actions
+        if let triggeredActionID = spokenPhraseTriggerDetector.triggeredActionID,
+            let match = SpokenPhraseMatcher.removingSuffix(
+                for: triggeredActionID,
+                from: text,
+                actions: actions
+            )
+        {
+            return match
+        }
+
+        guard let action = SpokenPhraseMatcher.exactMatch(in: text, actions: actions) else { return nil }
+        return SpokenPhraseMatch(action: action, remainingText: "")
     }
 
     // MARK: - Cancellation

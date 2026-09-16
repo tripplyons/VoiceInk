@@ -16,8 +16,6 @@ struct SettingsView: View {
     @AppStorage("restoreClipboardAfterPaste") private var restoreClipboardAfterPaste = true
     @AppStorage("clipboardRestoreDelay") private var clipboardRestoreDelay = 2.0
     @AppStorage(PasteMethod.userDefaultsKey) private var pasteMethodRawValue = PasteMethod.standard.rawValue
-    @AppStorage(UserDefaults.Keys.spokenSubmitEnabled) private var spokenSubmitEnabled = false
-    @AppStorage(UserDefaults.Keys.spokenSubmitPhrase) private var spokenSubmitPhrase = "press enter"
     @AppStorage(AppAppearancePreference.userDefaultsKey) private var appAppearancePreference = AppAppearancePreference
         .system
     @AppStorage(AppLanguagePreference.userDefaultsKey) private var appLanguagePreference = AppLanguagePreference
@@ -30,7 +28,6 @@ struct SettingsView: View {
 
     @State private var isMiddleClickExpanded = false
     @State private var isRestoreClipboardExpanded = false
-    @State private var isSpokenSubmitExpanded = false
 
     var body: some View {
         Form {
@@ -130,20 +127,6 @@ struct SettingsView: View {
             }
 
             Section("Pasting") {
-                ExpandableSettingsRow(
-                    isExpanded: $isSpokenSubmitExpanded,
-                    isEnabled: $spokenSubmitEnabled,
-                    label: "Submit with Spoken Phrase",
-                    infoMessage:
-                        "When a transcription ends with this phrase, VoiceInk removes the phrase, pastes the remaining text, and presses Return. Matching ignores capitalization and final punctuation."
-                ) {
-                    LabeledContent("Phrase") {
-                        TextField("press enter", text: $spokenSubmitPhrase)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 180)
-                    }
-                }
-
                 ExpandableSettingsRow(
                     isExpanded: $isRestoreClipboardExpanded,
                     isEnabled: $restoreClipboardAfterPaste,
