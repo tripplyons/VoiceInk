@@ -5,7 +5,7 @@ import Foundation
 enum SpeechAudioNormalizer {
     static let targetRMS: Float = 0.1
     static let minimumNormalizationGain: Float = 0.2
-    static let maximumNormalizationGain: Float = 8
+    static let maximumNormalizationGain: Float = 16
     static let targetLevelDB: Float = 20 * Float(log10(Double(targetRMS)))
     static let minimumNormalizationGainDB: Float =
         20 * Float(log10(Double(minimumNormalizationGain)))
@@ -52,6 +52,7 @@ struct StreamingSpeechLeveler {
     private var framesAboveSpeechGate = 0
     private var belowSpeechGateDuration = 0.0
     private var recentSpeechPeak: Float = 0.01
+    private var rumbleFilters: [SpeechRumbleFilter]
     private var limiters: [SpeechTransientLimiter]
 
     private let speechGateOpenRMS: Float = 0.0025
@@ -73,6 +74,7 @@ struct StreamingSpeechLeveler {
         gainRecoveryCoefficient = Float(
             exp(-1 / (safeSampleRate * Self.gainRecoveryTimeConstant))
         )
+        rumbleFilters = [SpeechRumbleFilter(sampleRate: safeSampleRate)]
         limiters = [SpeechTransientLimiter(sampleRate: safeSampleRate)]
     }
 
@@ -80,7 +82,7 @@ struct StreamingSpeechLeveler {
         guard count > 0 else { return }
 
         for index in 0..<count {
-            let sample = samples[index]
+            let sample = rumbleFilters[0].process(samples[index])
             trackAnalysis(sampleSquare: Double(sample) * Double(sample), peak: abs(sample))
             updateAppliedGain()
             samples[index] = limiters[0].process(sample * appliedGain)
@@ -101,7 +103,8 @@ struct StreamingSpeechLeveler {
             var squareSum: Double = 0
             var peak: Float = 0
             for channel in 0..<channelCount {
-                let sample = channels[channel][frame]
+                let sample = rumbleFilters[channel].process(channels[channel][frame])
+                channels[channel][frame] = sample
                 squareSum += Double(sample) * Double(sample)
                 peak = max(peak, abs(sample))
             }
@@ -148,6 +151,9 @@ struct StreamingSpeechLeveler {
 
     private mutating func ensureLimiterCount(_ count: Int) {
         guard limiters.count != count else { return }
+        rumbleFilters = (0..<count).map { _ in
+            SpeechRumbleFilter(sampleRate: sampleRate)
+        }
         limiters = (0..<count).map { _ in
             SpeechTransientLimiter(sampleRate: sampleRate)
         }
@@ -251,6 +257,42 @@ struct StreamingSpeechLeveler {
     ) -> Float {
         let blend = Float(1 - exp(-duration / timeConstant))
         return current + blend * (target - current)
+    }
+}
+
+/// Removes handling and room rumble before it can be amplified as speech.
+private struct SpeechRumbleFilter {
+    private let b0: Float
+    private let b1: Float
+    private let b2: Float
+    private let a1: Float
+    private let a2: Float
+    private var x1: Float = 0
+    private var x2: Float = 0
+    private var y1: Float = 0
+    private var y2: Float = 0
+
+    init(sampleRate: Double) {
+        let frequency = min(70, sampleRate * 0.49)
+        let omega = 2 * Double.pi * frequency / sampleRate
+        let cosine = cos(omega)
+        let alpha = sin(omega) / (2 * sqrt(0.5))
+        let a0 = 1 + alpha
+
+        b0 = Float(((1 + cosine) / 2) / a0)
+        b1 = Float((-(1 + cosine)) / a0)
+        b2 = Float(((1 + cosine) / 2) / a0)
+        a1 = Float((-2 * cosine) / a0)
+        a2 = Float((1 - alpha) / a0)
+    }
+
+    mutating func process(_ input: Float) -> Float {
+        let output = b0 * input + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2
+        x2 = x1
+        x1 = input
+        y2 = y1
+        y1 = output
+        return output
     }
 }
 

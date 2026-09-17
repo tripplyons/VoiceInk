@@ -368,8 +368,22 @@ struct VoiceInkTests {
         )
         let processed = processInStreamingChunks(quietSpeech, with: &leveler)
 
-        #expect(rms(processed.suffix(4_000)) > 0.025)
-        #expect(rms(processed.suffix(4_000)) < 0.031)
+        #expect(rms(processed.suffix(4_000)) > 0.05)
+        #expect(rms(processed.suffix(4_000)) < 0.062)
+    }
+
+    @Test func streamingSpeechLevelerAttenuatesLowRumble() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        let rumble = sineWave(
+            frequency: 40,
+            sampleRate: sampleRate,
+            amplitude: 0.003,
+            duration: 0.75
+        )
+        let processed = processInStreamingChunks(rumble, with: &leveler)
+
+        #expect(rms(processed.suffix(4_000)) < 0.0008)
     }
 
     @Test func streamingSpeechLevelerDoesNotBoostBelowGateAudio() {
