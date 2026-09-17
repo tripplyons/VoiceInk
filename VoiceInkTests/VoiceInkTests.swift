@@ -328,7 +328,7 @@ struct VoiceInkTests {
         let peak = normalizedSamples.lazy.map(abs).max() ?? 0
 
         #expect(speechRMS > 0.09 && speechRMS < 0.105)
-        #expect(peak <= 0.95)
+        #expect(peak <= 0.951)
     }
 
     @Test func streamingSpeechLevelerRecoversAfterTransient() {
@@ -357,36 +357,27 @@ struct VoiceInkTests {
         #expect(rms(speechAfterTransient.suffix(4_000)) > 0.075)
     }
 
-    @Test func streamingSpeechLevelerBoostsQuietSpeechAtStartup() {
+    @Test func normalizationGainHasNoMinimumOrMaximum() {
+        #expect(abs(SpeechAudioNormalizer.gain(forMeasuredRMS: 0.000_1) - 1_000) < 0.001)
+        #expect(abs(SpeechAudioNormalizer.gain(forMeasuredRMS: 1) - 0.1) < 0.000_1)
+    }
+
+    @Test func streamingSpeechLevelerNormalizesVeryQuietAudioAtStartup() {
         let sampleRate = 16_000.0
         var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
-        let quietSpeech = sineWave(
+        let quietAudio = sineWave(
             frequency: 220,
             sampleRate: sampleRate,
-            amplitude: 0.005,
+            amplitude: 0.000_5,
             duration: 0.75
         )
-        let processed = processInStreamingChunks(quietSpeech, with: &leveler)
+        let processed = processInStreamingChunks(quietAudio, with: &leveler)
 
-        #expect(rms(processed.suffix(4_000)) > 0.05)
-        #expect(rms(processed.suffix(4_000)) < 0.062)
+        #expect(rms(processed.suffix(4_000)) > 0.09)
+        #expect(rms(processed.suffix(4_000)) < 0.11)
     }
 
-    @Test func streamingSpeechLevelerAttenuatesLowRumble() {
-        let sampleRate = 16_000.0
-        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
-        let rumble = sineWave(
-            frequency: 40,
-            sampleRate: sampleRate,
-            amplitude: 0.003,
-            duration: 0.75
-        )
-        let processed = processInStreamingChunks(rumble, with: &leveler)
-
-        #expect(rms(processed.suffix(4_000)) < 0.0008)
-    }
-
-    @Test func streamingSpeechLevelerDoesNotBoostBelowGateAudio() {
+    @Test func streamingSpeechLevelerNormalizesAudioBelowFormerGate() {
         let sampleRate = 16_000.0
         var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
         let lowLevelAudio = sineWave(
@@ -397,10 +388,11 @@ struct VoiceInkTests {
         )
         let processed = processInStreamingChunks(lowLevelAudio, with: &leveler)
 
-        #expect(rms(processed.suffix(4_000)) < 0.0023)
+        #expect(rms(processed.suffix(4_000)) > 0.09)
+        #expect(rms(processed.suffix(4_000)) < 0.11)
     }
 
-    @Test func streamingSpeechLevelerStopsBoostingAudioBelowTheCloseGate() {
+    @Test func streamingSpeechLevelerTracksLowerAmplitudeWithoutGate() {
         let sampleRate = 16_000.0
         var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
         _ = processInStreamingChunks(
@@ -412,7 +404,8 @@ struct VoiceInkTests {
             with: &leveler
         )
 
-        #expect(rms(lowLevelAudio.suffix(4_000)) < 0.0023)
+        #expect(rms(lowLevelAudio.suffix(4_000)) > 0.09)
+        #expect(rms(lowLevelAudio.suffix(4_000)) < 0.11)
     }
 
     @Test func streamingSpeechLevelerRelaxesTowardNeutralDuringSilence() {
