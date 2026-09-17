@@ -53,7 +53,8 @@ class AudioProcessor {
         var normalizedSamples = samples
         SpeechAudioNormalizer.normalize(
             &normalizedSamples,
-            sampleRate: AudioFormat.targetSampleRate
+            sampleRate: AudioFormat.targetSampleRate,
+            strength: NormalizationSettings.loadStrength()
         )
         return normalizedSamples
     }
@@ -79,7 +80,10 @@ class AudioProcessor {
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
-        var leveler = StreamingSpeechLeveler(sampleRate: format.sampleRate)
+        var leveler = StreamingSpeechLeveler(
+            sampleRate: format.sampleRate,
+            strength: NormalizationSettings.loadStrength()
+        )
 
         while inputFile.framePosition < inputFile.length {
             try inputFile.read(into: buffer, frameCount: chunkSize)

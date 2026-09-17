@@ -294,7 +294,7 @@ struct VoiceInkTests {
         let settings = MicrophoneEqualizerSettings(
             isEnabled: true,
             highPassFrequency: 80,
-            bandGains: [0, 0, 0, 6, 0, 0],
+            bandGains: [0, 0, 0, 12, 0, 0],
             lowPassFrequency: 7_500
         )
         let processor = AudioProcessor()
@@ -306,6 +306,38 @@ struct VoiceInkTests {
         let speechRMS = rms(processedSamples.suffix(12_000))
         #expect(speechRMS > 0.09 && speechRMS < 0.11)
         #expect((processedSamples.lazy.map(abs).max() ?? 0) <= 0.95)
+    }
+
+    @Test func normalizationStrengthControlsBoostAndAttenuation() {
+        for amplitude: Float in [0.03, 0.25] {
+            let source = sineWave(frequency: 220, sampleRate: 16_000, amplitude: amplitude, duration: 2)
+            let levels = [Float(0), 0.5, 1].map { strength in
+                var samples = source
+                SpeechAudioNormalizer.normalize(&samples, sampleRate: 16_000, strength: strength)
+                return rms(samples.suffix(16_000))
+            }
+            #expect(abs(levels[0] - rms(source.suffix(16_000))) < 0.005)
+            if amplitude < 0.1 {
+                #expect(levels[0] < levels[1] && levels[1] < levels[2])
+            } else {
+                #expect(levels[0] > levels[1] && levels[1] > levels[2])
+            }
+            #expect(levels[2] > 0.09 && levels[2] < 0.11)
+        }
+    }
+
+    @Test func normalizationStrengthPersistsAndValidates() throws {
+        let suiteName = "NormalizationStrengthTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        #expect(NormalizationSettings.loadStrength(from: defaults) == 1)
+        defaults.set(0.35, forKey: NormalizationSettings.strengthKey)
+        #expect(NormalizationSettings.loadStrength(from: defaults) == Float(0.35))
+        defaults.set(2, forKey: NormalizationSettings.strengthKey)
+        #expect(NormalizationSettings.loadStrength(from: defaults) == 1)
+        defaults.set(-1, forKey: NormalizationSettings.strengthKey)
+        #expect(NormalizationSettings.loadStrength(from: defaults) == 0)
+        #expect(NormalizationSettings.validatedStrength(.nan) == 1)
     }
 
     @Test func speechNormalizationIgnoresIsolatedPeak() throws {

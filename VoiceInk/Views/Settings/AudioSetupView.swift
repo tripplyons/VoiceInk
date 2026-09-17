@@ -6,6 +6,7 @@ struct AudioSetupView: View {
     @ObservedObject private var mediaController = MediaController.shared
     @ObservedObject private var playbackController = PlaybackController.shared
     @State private var microphoneSourceBeforePriorityOrder: MicrophoneSourceSelection = .systemDefault
+    @AppStorage(NormalizationSettings.strengthKey) private var normalizationStrength = 1.0
     @State private var refreshIconRotation = 0.0
 
     var body: some View {
@@ -30,6 +31,28 @@ struct AudioSetupView: View {
                 Text("Microphone EQ")
             } footer: {
                 Text("Shapes microphone audio before live transcription, recording, and normalization. Changes apply to the next recording.")
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    Text("Strength")
+                        .frame(width: 105, alignment: .leading)
+                    Slider(value: normalizationStrengthBinding, in: 0...1, step: 0.05)
+                        .accessibilityLabel("Normalization strength")
+                        .accessibilityValue(normalizationStrengthLabel)
+                    Text(normalizationStrengthLabel)
+                        .font(.body.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 64, alignment: .trailing)
+                }
+                Button("Reset Normalization") {
+                    normalizationStrength = 1
+                }
+                .buttonStyle(.borderless)
+            } header: {
+                Text("Audio Normalization")
+            } footer: {
+                Text("Runs after microphone EQ and controls how strongly quiet and loud audio are leveled. 0% disables adaptive leveling; 100% uses full leveling. Rumble filtering and peak protection remain active. Applies to the next recording or audio import.")
             }
 
             Section {
@@ -59,6 +82,17 @@ struct AudioSetupView: View {
                 microphoneSourceBeforePriorityOrder = currentMicrophoneSource
             }
         }
+    }
+
+    private var normalizationStrengthBinding: Binding<Double> {
+        Binding(
+            get: { Double(NormalizationSettings.validatedStrength(Float(normalizationStrength))) },
+            set: { normalizationStrength = $0 }
+        )
+    }
+
+    private var normalizationStrengthLabel: String {
+        normalizationStrengthBinding.wrappedValue.formatted(.percent.precision(.fractionLength(0)))
     }
 
     @ViewBuilder

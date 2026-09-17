@@ -195,7 +195,10 @@ final class CoreAudioRecorder: @unchecked Sendable {
                     channelCount: 1
                 )
                 : nil
-            liveSpeechLeveler = StreamingSpeechLeveler(sampleRate: outputFormat.mSampleRate)
+            liveSpeechLeveler = StreamingSpeechLeveler(
+                sampleRate: outputFormat.mSampleRate,
+                strength: NormalizationSettings.loadStrength()
+            )
 
             try startAudioUnit()
         } catch {

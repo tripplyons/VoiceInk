@@ -4,8 +4,8 @@ import Foundation
 enum SpeechAudioNormalizer {
     static let targetRMS: Float = 0.1
 
-    static func normalize(_ samples: inout [Float], sampleRate: Double) {
-        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+    static func normalize(_ samples: inout [Float], sampleRate: Double, strength: Float = 1) {
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate, strength: strength)
         leveler.process(&samples)
     }
 
@@ -19,6 +19,7 @@ enum SpeechAudioNormalizer {
 /// recent-level window. Every nonzero amplitude contributes to the gain estimate;
 /// there is no level gate or minimum/maximum gain policy.
 struct StreamingSpeechLeveler {
+    private let strength: Float
     private let sampleRate: Double
     private let analysisFrameSize: Int
     private var analysisSampleCount = 0
@@ -35,7 +36,8 @@ struct StreamingSpeechLeveler {
     private let gainReductionCoefficient: Float
     private let gainRecoveryCoefficient: Float
 
-    init(sampleRate: Double) {
+    init(sampleRate: Double, strength: Float = 1) {
+        self.strength = NormalizationSettings.validatedStrength(strength)
         let safeSampleRate = max(sampleRate, 1)
         self.sampleRate = safeSampleRate
         analysisFrameSize = max(1, Int(safeSampleRate * 0.02))
@@ -138,7 +140,8 @@ struct StreamingSpeechLeveler {
             resetToNeutral()
             return
         }
-        desiredGain = gain
+        // Scale the correction in decibels, not the target loudness.
+        desiredGain = strength == 0 ? 1 : pow(gain, strength)
     }
 
     private mutating func resetToNeutral() {
