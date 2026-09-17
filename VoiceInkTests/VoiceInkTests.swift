@@ -327,7 +327,7 @@ struct VoiceInkTests {
         let speechRMS = rms(normalizedSamples.suffix(16_000))
         let peak = normalizedSamples.lazy.map(abs).max() ?? 0
 
-        #expect(speechRMS > 0.08 && speechRMS < 0.09)
+        #expect(speechRMS > 0.09 && speechRMS < 0.105)
         #expect(peak <= 0.95)
     }
 
@@ -355,6 +355,50 @@ struct VoiceInkTests {
         #expect(rms(warmup.suffix(4_000)) > 0.075)
         #expect((limitedTransient.lazy.map(abs).max() ?? 0) <= 0.95)
         #expect(rms(speechAfterTransient.suffix(4_000)) > 0.075)
+    }
+
+    @Test func streamingSpeechLevelerBoostsQuietSpeechAtStartup() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        let quietSpeech = sineWave(
+            frequency: 220,
+            sampleRate: sampleRate,
+            amplitude: 0.005,
+            duration: 0.75
+        )
+        let processed = processInStreamingChunks(quietSpeech, with: &leveler)
+
+        #expect(rms(processed.suffix(4_000)) > 0.025)
+        #expect(rms(processed.suffix(4_000)) < 0.031)
+    }
+
+    @Test func streamingSpeechLevelerDoesNotBoostBelowGateAudio() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        let lowLevelAudio = sineWave(
+            frequency: 220,
+            sampleRate: sampleRate,
+            amplitude: 0.003,
+            duration: 0.75
+        )
+        let processed = processInStreamingChunks(lowLevelAudio, with: &leveler)
+
+        #expect(rms(processed.suffix(4_000)) < 0.0023)
+    }
+
+    @Test func streamingSpeechLevelerStopsBoostingAudioBelowTheCloseGate() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        _ = processInStreamingChunks(
+            sineWave(frequency: 220, sampleRate: sampleRate, amplitude: 0.03),
+            with: &leveler
+        )
+        let lowLevelAudio = processInStreamingChunks(
+            sineWave(frequency: 220, sampleRate: sampleRate, amplitude: 0.003),
+            with: &leveler
+        )
+
+        #expect(rms(lowLevelAudio.suffix(4_000)) < 0.0023)
     }
 
     @Test func streamingSpeechLevelerRelaxesTowardNeutralDuringSilence() {
@@ -404,17 +448,119 @@ struct VoiceInkTests {
         #expect(rms(louderSpeech.suffix(4_000)) < 0.11)
     }
 
+    @Test func streamingSpeechLevelerRecoversQuicklyAfterLoudSpeech() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        _ = processInStreamingChunks(
+            sineWave(frequency: 220, sampleRate: sampleRate, amplitude: 0.03),
+            with: &leveler
+        )
+        let loudSpeech = processInStreamingChunks(
+            sineWave(
+                frequency: 220,
+                sampleRate: sampleRate,
+                amplitude: 0.65,
+                duration: 0.25
+            ),
+            with: &leveler
+        )
+        let quietSpeechAfterLoud = processInStreamingChunks(
+            sineWave(
+                frequency: 220,
+                sampleRate: sampleRate,
+                amplitude: 0.03,
+                duration: 0.5
+            ),
+            with: &leveler
+        )
+
+        #expect((loudSpeech.lazy.map(abs).max() ?? 0) <= 0.95)
+        #expect(rms(quietSpeechAfterLoud.prefix(3_200)) > 0.035)
+        #expect(rms(quietSpeechAfterLoud.suffix(3_200)) > 0.09)
+        #expect(rms(quietSpeechAfterLoud.suffix(3_200)) < 0.105)
+    }
+
+    @Test func streamingSpeechLevelerReducesVeryLoudSpeechToTarget() {
+        let sampleRate = 16_000.0
+        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate)
+        let loudSpeech = processInStreamingChunks(
+            sineWave(
+                frequency: 220,
+                sampleRate: sampleRate,
+                amplitude: 0.65,
+                duration: 0.75
+            ),
+            with: &leveler
+        )
+
+        #expect(rms(loudSpeech.suffix(4_000)) > 0.09)
+        #expect(rms(loudSpeech.suffix(4_000)) < 0.11)
+        #expect((loudSpeech.lazy.map(abs).max() ?? 0) <= 0.95)
+    }
+
+    @Test func streamingSpeechLevelerIgnoresCallbackBoundaries() {
+        let source = sineWave(
+            frequency: 220,
+            sampleRate: 16_000,
+            amplitude: 0.03,
+            duration: 0.75
+        ) + sineWave(
+            frequency: 220,
+            sampleRate: 16_000,
+            amplitude: 0.65,
+            duration: 0.25
+        ) + sineWave(
+            frequency: 220,
+            sampleRate: 16_000,
+            amplitude: 0.03,
+            duration: 0.5
+        ) + [0]
+        var referenceLeveler = StreamingSpeechLeveler(sampleRate: 16_000)
+        var variedLeveler = StreamingSpeechLeveler(sampleRate: 16_000)
+        let reference = processInStreamingChunks(
+            source,
+            with: &referenceLeveler,
+            chunkPattern: [320]
+        )
+        let varied = processInStreamingChunks(
+            source,
+            with: &variedLeveler,
+            chunkPattern: [127, 911, 53, 4_096, 29]
+        )
+
+        let maximumDifference = zip(reference, varied).map { pair in
+            abs(pair.0 - pair.1)
+        }.max() ?? 0
+        #expect(reference.count == source.count)
+        #expect(varied.count == source.count)
+        #expect(maximumDifference < 0.000_001)
+    }
+
     private func processInStreamingChunks(
         _ samples: [Float],
         with leveler: inout StreamingSpeechLeveler,
         chunkSize: Int = 320
     ) -> [Float] {
+        processInStreamingChunks(samples, with: &leveler, chunkPattern: [chunkSize])
+    }
+
+    private func processInStreamingChunks(
+        _ samples: [Float],
+        with leveler: inout StreamingSpeechLeveler,
+        chunkPattern: [Int]
+    ) -> [Float] {
         var output: [Float] = []
         output.reserveCapacity(samples.count)
-        for start in stride(from: 0, to: samples.count, by: chunkSize) {
-            var chunk = Array(samples[start..<min(start + chunkSize, samples.count)])
+        var start = 0
+        var patternIndex = 0
+        while start < samples.count {
+            let chunkSize = chunkPattern[patternIndex % chunkPattern.count]
+            let end = min(start + chunkSize, samples.count)
+            var chunk = Array(samples[start..<end])
             leveler.process(&chunk)
             output += chunk
+            start = end
+            patternIndex += 1
         }
         return output
     }

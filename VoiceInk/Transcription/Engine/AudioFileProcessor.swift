@@ -58,7 +58,8 @@ class AudioProcessor {
         return normalizedSamples
     }
 
-    /// Normalize a recording from its speech level, then tame short transients.
+    /// Adaptively level a recording from recent speech loudness, sharing gain across
+    /// channels, then tame short transients.
     func normalizeAudioFile(at url: URL) throws {
         let inputFile = try AVAudioFile(forReading: url)
         let format = inputFile.processingFormat
@@ -67,22 +68,6 @@ class AudioProcessor {
         guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
             throw AudioProcessingError.conversionFailed
         }
-
-        var frameLevels: [Float] = []
-        while inputFile.framePosition < inputFile.length {
-            try inputFile.read(into: buffer, frameCount: chunkSize)
-            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
-                throw AudioProcessingError.sampleExtractionFailed
-            }
-
-            for channel in 0..<channelCount {
-                frameLevels += SpeechAudioNormalizer.frameRMS(
-                    UnsafeBufferPointer(start: channels[channel], count: Int(buffer.frameLength)),
-                    sampleRate: format.sampleRate
-                )
-            }
-        }
-        guard !frameLevels.isEmpty else { return }
 
         let temporaryURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).normalizing-\(UUID().uuidString).wav")
@@ -94,25 +79,19 @@ class AudioProcessor {
             commonFormat: format.commonFormat,
             interleaved: format.isInterleaved
         )
-        let gain = SpeechAudioNormalizer.normalizationGain(for: frameLevels)
-        var limiters = (0..<channelCount).map { _ in
-            SpeechAudioLimiter(sampleRate: format.sampleRate)
-        }
+        var leveler = StreamingSpeechLeveler(sampleRate: format.sampleRate)
 
-        inputFile.framePosition = 0
         while inputFile.framePosition < inputFile.length {
             try inputFile.read(into: buffer, frameCount: chunkSize)
             guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
                 throw AudioProcessingError.sampleExtractionFailed
             }
 
-            for channel in 0..<channelCount {
-                limiters[channel].process(
-                    channels[channel],
-                    count: Int(buffer.frameLength),
-                    gain: gain
-                )
-            }
+            leveler.process(
+                channels,
+                channelCount: channelCount,
+                frameCount: Int(buffer.frameLength)
+            )
             try outputFile.write(from: buffer)
         }
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
