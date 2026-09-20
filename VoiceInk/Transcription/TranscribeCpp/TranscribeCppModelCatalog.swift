@@ -80,8 +80,25 @@ enum TranscribeCppModelCatalog {
         boundaryEnergyWindowSamples: 1_600
     )
 
+    /// Parakeet TDT v3 finetune published by Oruk. The Q8_0 export runs on
+    /// transcribe.cpp's existing Parakeet implementation, so no runtime change is needed.
+    static let orukeet = TranscribeCppModelArtifact(
+        modelName: "orukeet",
+        fileName: "orukeet-transcribe-cpp-Q8_0.gguf",
+        repository: "oruk/orukeet",
+        repositoryRevision: "debfb0d5423d4b0446361e0ea024e6891e23a249",
+        expectedFileSize: 739_508_608,
+        expectedSHA256: "cad2f52ac91cad829279422301989687c2cf02e19157352ed25ea501b90dbb7e",
+        architectureHint: "parakeet",
+        enablesInverseTextNormalization: false,
+        maximumChunkSeconds: 300,
+        boundarySearchSeconds: 5,
+        boundaryEnergyWindowSamples: 1_600
+    )
+
     private static let artifactsByModelName = [
         senseVoiceSmall.modelName: senseVoiceSmall,
+        orukeet.modelName: orukeet,
     ]
 
     static func artifact(for modelName: String) -> TranscribeCppModelArtifact? {

@@ -93,6 +93,15 @@ enum LanguageDictionary {
         includesAutoDetect: true
     )
 
+    static let orukeet = forCodes(
+        [
+            "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
+            "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro",
+            "ru", "sk", "sl", "sv", "uk",
+        ],
+        includesAutoDetect: true
+    )
+
     static let cohereTranscribe = forCodes([
         "ar", "de", "el", "en", "es", "fr", "it", "ja", "ko", "nl", "pl", "pt", "vi", "zh",
     ])

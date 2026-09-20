@@ -96,6 +96,18 @@ enum TranscriptionModelRegistry {
                 supportedLanguages: LanguageDictionary.senseVoiceSmall
             ),
 
+            TranscribeCppModel(
+                name: "orukeet",
+                displayName: "Orukeet",
+                description: "Parakeet V3 finetune with Gabor kernels, 25 European languages, runs privately on your Mac",
+                size: "705 MB",
+                speed: 0.95,
+                accuracy: 0.94,
+                ramUsage: 1.0,
+                publisher: "Oruk",
+                supportedLanguages: LanguageDictionary.orukeet
+            ),
+
             // Local Models
             WhisperModel(
                 name: "ggml-tiny",
