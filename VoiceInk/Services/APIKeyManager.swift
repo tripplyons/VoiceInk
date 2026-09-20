@@ -26,6 +26,12 @@ final class APIKeyManager {
         "openrouter": "openRouterAPIKey",
     ]
 
+    /// Environment variables consulted when a provider has no key in the Keychain.
+    /// Lets a key configured for the shell be used without entering it in the UI.
+    private static let providerToEnvironmentVariable: [String: String] = [
+        "openrouter": "OPENROUTER_API_KEY"
+    ]
+
     private init() {}
 
     // MARK: - Standard Provider API Keys
@@ -43,10 +49,14 @@ final class APIKeyManager {
         return success
     }
 
-    /// Retrieves an API key for a provider.
+    /// Retrieves an API key for a provider, falling back to the provider's environment
+    /// variable when nothing is stored in the Keychain.
     func getAPIKey(forProvider provider: String) -> String? {
         let keyIdentifier = keychainIdentifier(forProvider: provider)
-        return keychain.getString(forKey: keyIdentifier)
+        if let stored = keychain.getString(forKey: keyIdentifier), !stored.isEmpty {
+            return stored
+        }
+        return environmentAPIKey(forProvider: provider)
     }
 
     /// Deletes an API key for a provider.
@@ -60,10 +70,25 @@ final class APIKeyManager {
         return success
     }
 
-    /// Checks if an API key exists for a provider.
+    /// Checks if an API key exists for a provider, including one supplied by the
+    /// provider's environment variable.
     func hasAPIKey(forProvider provider: String) -> Bool {
         let keyIdentifier = keychainIdentifier(forProvider: provider)
-        return keychain.exists(forKey: keyIdentifier)
+        return keychain.exists(forKey: keyIdentifier) || environmentAPIKey(forProvider: provider) != nil
+    }
+
+    /// Returns the non-empty environment key for a provider, if it declares one.
+    func environmentAPIKey(
+        forProvider provider: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> String? {
+        guard let variable = Self.providerToEnvironmentVariable[provider.lowercased()],
+            let value = environment[variable]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !value.isEmpty
+        else {
+            return nil
+        }
+        return value
     }
 
     // MARK: - Custom Model API Keys
