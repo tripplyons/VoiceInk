@@ -34,7 +34,10 @@ class AudioProcessor {
         }
     }
 
-    func processAudioToSamples(_ url: URL) async throws -> [Float] {
+    func processAudioToSamples(
+        _ url: URL,
+        strength: Float = NormalizationSettings.loadStrength()
+    ) async throws -> [Float] {
         let samples: [Float]
         do {
             samples = try readUsingAudioFile(url)
@@ -54,14 +57,17 @@ class AudioProcessor {
         SpeechAudioNormalizer.normalize(
             &normalizedSamples,
             sampleRate: AudioFormat.targetSampleRate,
-            strength: NormalizationSettings.loadStrength()
+            strength: strength
         )
         return normalizedSamples
     }
 
     /// Adaptively level a recording from recent speech loudness, sharing gain across
     /// channels, then tame short transients.
-    func normalizeAudioFile(at url: URL) throws {
+    func normalizeAudioFile(
+        at url: URL,
+        strength: Float = NormalizationSettings.loadStrength()
+    ) throws {
         let inputFile = try AVAudioFile(forReading: url)
         let format = inputFile.processingFormat
         let channelCount = Int(format.channelCount)
@@ -82,7 +88,7 @@ class AudioProcessor {
         )
         var leveler = StreamingSpeechLeveler(
             sampleRate: format.sampleRate,
-            strength: NormalizationSettings.loadStrength()
+            strength: strength
         )
 
         while inputFile.framePosition < inputFile.length {

@@ -6,7 +6,8 @@ struct AudioSetupView: View {
     @ObservedObject private var mediaController = MediaController.shared
     @ObservedObject private var playbackController = PlaybackController.shared
     @State private var microphoneSourceBeforePriorityOrder: MicrophoneSourceSelection = .systemDefault
-    @AppStorage(NormalizationSettings.strengthKey) private var normalizationStrength = 1.0
+    @AppStorage(NormalizationSettings.strengthKey) private var normalizationStrength = Double(
+        NormalizationSettings.defaultStrength)
     @State private var refreshIconRotation = 0.0
 
     var body: some View {

@@ -196,9 +196,9 @@ struct VoiceInkTests {
         store.reset()
 
         #expect(store.settings.isEnabled)
-        #expect(store.settings.highPassFrequency == 110)
-        #expect(store.settings.bandGains == [-9.5, -6.5, -3.5, -1, 1, 6, 6])
-        #expect(store.settings.lowPassFrequency == 7_800)
+        #expect(store.settings.highPassFrequency == 300)
+        #expect(store.settings.bandGains == Array(repeating: 0, count: MicrophoneEqualizerSettings.bandFrequencies.count))
+        #expect(store.settings.lowPassFrequency == 3_000)
     }
 
     @MainActor
@@ -300,7 +300,8 @@ struct VoiceInkTests {
         let processor = AudioProcessor()
         try processor.saveSamplesAsWav(samples: samples, to: url)
 
-        try processor.processMicrophoneRecording(at: url, settings: settings)
+        // Pin the strength so the host app's saved setting cannot change the result.
+        try processor.processMicrophoneRecording(at: url, settings: settings, strength: 1)
 
         let processedSamples = try readSamples(from: url)
         let speechRMS = rms(processedSamples.suffix(12_000))
@@ -330,14 +331,14 @@ struct VoiceInkTests {
         let suiteName = "NormalizationStrengthTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        #expect(NormalizationSettings.loadStrength(from: defaults) == 1)
+        #expect(NormalizationSettings.loadStrength(from: defaults) == NormalizationSettings.defaultStrength)
         defaults.set(0.35, forKey: NormalizationSettings.strengthKey)
         #expect(NormalizationSettings.loadStrength(from: defaults) == Float(0.35))
         defaults.set(2, forKey: NormalizationSettings.strengthKey)
         #expect(NormalizationSettings.loadStrength(from: defaults) == 1)
         defaults.set(-1, forKey: NormalizationSettings.strengthKey)
         #expect(NormalizationSettings.loadStrength(from: defaults) == 0)
-        #expect(NormalizationSettings.validatedStrength(.nan) == 1)
+        #expect(NormalizationSettings.validatedStrength(.nan) == NormalizationSettings.defaultStrength)
     }
 
     @Test func speechNormalizationIgnoresIsolatedPeak() throws {
@@ -353,7 +354,8 @@ struct VoiceInkTests {
 
         let processor = AudioProcessor()
         try processor.saveSamplesAsWav(samples: samples, to: url)
-        try processor.normalizeAudioFile(at: url)
+        // Pin the strength so the host app's saved setting cannot change the result.
+        try processor.normalizeAudioFile(at: url, strength: 1)
 
         let normalizedSamples = try readSamples(from: url)
         let speechRMS = rms(normalizedSamples.suffix(16_000))

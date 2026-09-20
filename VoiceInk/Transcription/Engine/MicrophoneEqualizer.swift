@@ -152,10 +152,11 @@ private struct BiquadFilter {
 extension AudioProcessor {
     func processMicrophoneRecording(
         at url: URL,
-        settings: MicrophoneEqualizerSettings
+        settings: MicrophoneEqualizerSettings,
+        strength: Float = NormalizationSettings.loadStrength()
     ) throws {
         guard settings.isEnabled else {
-            try normalizeAudioFile(at: url)
+            try normalizeAudioFile(at: url, strength: strength)
             return
         }
 
@@ -170,7 +171,7 @@ extension AudioProcessor {
             gain: 1
         )
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
-        try normalizeAudioFile(at: url)
+        try normalizeAudioFile(at: url, strength: strength)
     }
 
     private func writeEqualizedAudio(

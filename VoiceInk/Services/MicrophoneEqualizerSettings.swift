@@ -3,11 +3,12 @@ import Foundation
 
 struct MicrophoneEqualizerSettings: Codable, Equatable, Sendable {
     static let bandFrequencies: [Float] = [125, 250, 500, 1_000, 2_000, 4_000, 6_000]
-    static let defaultHighPassFrequency: Float = 110
-    static let defaultBandGains: [Float] = [-9.5, -6.5, -3.5, -1, 1, 6, 6]
-    static let defaultLowPassFrequency: Float = 7_800
-    static let highPassRange: ClosedRange<Float> = 40...300
-    static let lowPassRange: ClosedRange<Float> = 3_000...7_800
+    static let defaultHighPassFrequency: Float = 300
+    static let defaultBandGains: [Float] = Array(repeating: 0, count: bandFrequencies.count)
+    static let defaultLowPassFrequency: Float = 3_000
+    static let highPassRange: ClosedRange<Float> = 20...1_000
+    /// The upper bound stays below the 8 kHz Nyquist of the 16 kHz recording format.
+    static let lowPassRange: ClosedRange<Float> = 1_000...7_900
     static let gainRange: ClosedRange<Float> = -12...12
 
     var isEnabled: Bool

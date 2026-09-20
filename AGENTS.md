@@ -40,7 +40,7 @@ xcodebuild test \
   DEVELOPMENT_TEAM='' \
   CODE_SIGN_ENTITLEMENTS='' \
   'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) LOCAL_BUILD' \
-  -only-testing:VoiceInkTests/VoiceInkTests \
+  -only-testing:VoiceInkTests \
   -skip-testing:VoiceInkUITests
 ```
 
@@ -50,6 +50,7 @@ Notes:
 - `-skipMacroValidation` is required for `MLXHuggingFaceMacros`.
 - The signing overrides avoid missing `Mac Development` certificates and provisioning profiles.
 - Xcode may still build the UI-test runner even when UI tests are skipped.
+- `-only-testing:VoiceInkTests` selects the whole test target. Adding a second component, as in `-only-testing:VoiceInkTests/VoiceInkTests`, selects only the suite named `VoiceInkTests` and silently skips the other suites in the target, such as `SenseVoiceTests` and `OrukeetTests`. Use `-only-testing:VoiceInkTests/<SuiteName>` deliberately when narrowing to one suite.
 - If the dedicated derived-data directory develops a stale linker or permission error, remove only `$DERIVED_DATA` and retry once. Do not clear the user's global DerivedData.
 - Read the final `** TEST SUCCEEDED **` or `** TEST FAILED **` marker. Xcode's output can list test cases after the marker.
 
@@ -64,6 +65,8 @@ For a compile-only check, replace `test` with `build` and omit the two testing s
 
 ## Verification
 
-- Match checks to the change. Run focused unit tests for isolated logic and the full `VoiceInkTests` suite for shared audio or recorder changes.
+- Match checks to the change. Run focused unit tests for isolated logic and the full `VoiceInkTests` target for shared audio or recorder changes.
+- Some tests are opt-in behind environment variables because they download real models, such as `VOICEINK_SENSEVOICE_AUDIO` and `VOICEINK_ORUKEET_AUDIO`. They skip when the variable is unset.
+- Tests run inside the VoiceInk app host, so `UserDefaults.standard` is the real app domain and carries whatever the developer has configured. Audio entry points such as `normalizeAudioFile`, `processAudioToSamples`, and `processMicrophoneRecording` take an explicit `strength` that defaults to the stored setting. Pass it explicitly in tests rather than relying on the default.
 - Review `git diff --check` and `git status --short` before reporting completion.
 - Report test or build failures with the actual blocker. Do not claim success from compilation alone when behavior changed.
