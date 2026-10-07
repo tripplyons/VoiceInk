@@ -475,7 +475,11 @@ struct ProviderDetailPanel: View {
                 verificationSucceeded = result.isValid
 
                 if result.isValid {
-                    APIKeyManager.shared.saveAPIKey(trimmedKey, forProvider: descriptor.providerKey)
+                    guard APIKeyManager.shared.saveAPIKey(trimmedKey, forProvider: descriptor.providerKey) else {
+                        verificationSucceeded = false
+                        verificationMessage = String(localized: "Could not save this API key to Keychain. Try again.")
+                        return
+                    }
                     if let provider = descriptor.aiProvider, aiService.selectedProvider == provider {
                         aiService.apiKey = trimmedKey
                         aiService.isAPIKeyValid = true
