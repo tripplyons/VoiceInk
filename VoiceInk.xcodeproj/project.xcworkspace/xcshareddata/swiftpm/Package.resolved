@@ -1,5 +1,5 @@
 {
-  "originHash" : "a16b09e2c0e3fee7d86fbd260972eb0b946296e1771f315691d250410632fd8c",
+  "originHash" : "070c17473446a7deda67e8f986994d8bb48d41a9c9edc543ad0995bce17c25cd",
   "pins" : [
     {
       "identity" : "axswift",
@@ -67,7 +67,7 @@
     {
       "identity" : "mlx-swift-lm",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ml-explore/mlx-swift-lm",
+      "location" : "https://github.com/ml-explore/mlx-swift-lm.git",
       "state" : {
         "revision" : "cd1ab3dd98ceb02d095490aa25e61298ea3e2f5b"
       }
@@ -79,6 +79,14 @@
       "state" : {
         "revision" : "2849f5323265386e200484b0d0f896e73c3411b9",
         "version" : "6.0.1"
+      }
+    },
+    {
+      "identity" : "rnnoise-spm",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jkuri/rnnoise-spm.git",
+      "state" : {
+        "revision" : "9bb6d4c4971a8594f9306cdb1acb6b4013b6ef05"
       }
     },
     {

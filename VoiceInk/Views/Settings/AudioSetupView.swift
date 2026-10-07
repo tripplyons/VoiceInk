@@ -8,6 +8,9 @@ struct AudioSetupView: View {
     @State private var microphoneSourceBeforePriorityOrder: MicrophoneSourceSelection = .systemDefault
     @AppStorage(NormalizationSettings.strengthKey) private var normalizationStrength = Double(
         NormalizationSettings.defaultStrength)
+    @AppStorage(VoiceIsolationSettings.strengthKey) private var isolationStrength = Double(
+        VoiceIsolationSettings.defaultStrength)
+    @AppStorage(VoiceIsolationSettings.blendModeKey) private var isolationBlendMode = VoiceIsolationSettings.BlendMode.linear.rawValue
     @State private var refreshIconRotation = 0.0
 
     var body: some View {
@@ -24,6 +27,35 @@ struct AudioSetupView: View {
                 } header: {
                     Text("Priority Order")
                 }
+            }
+
+            Section {
+                HStack(spacing: 12) {
+                    Text("Strength")
+                        .frame(width: 105, alignment: .leading)
+                    Slider(value: isolationStrengthBinding, in: 0...1, step: 0.05)
+                        .accessibilityLabel("RNNoise strength")
+                        .accessibilityValue(isolationStrengthLabel)
+                    Text(isolationStrengthLabel)
+                        .font(.body.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 64, alignment: .trailing)
+                }
+                Picker("Blend mode", selection: $isolationBlendMode) {
+                    ForEach(VoiceIsolationSettings.BlendMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.menu)
+                Button("Reset Voice Isolation") {
+                    isolationStrength = Double(VoiceIsolationSettings.defaultStrength)
+                    isolationBlendMode = VoiceIsolationSettings.BlendMode.linear.rawValue
+                }
+                .buttonStyle(.borderless)
+            } header: {
+                Text("Voice Isolation (RNNoise)")
+            } footer: {
+                Text("Removes background noise locally before EQ and normalization. 0% bypasses isolation; 100% uses the denoised signal. Linear blends evenly. Equal-power can sound louder near the midpoint. Applies to the next recording or audio import. Does not separate overlapping speakers.")
             }
 
             Section {
@@ -47,13 +79,13 @@ struct AudioSetupView: View {
                         .frame(width: 64, alignment: .trailing)
                 }
                 Button("Reset Normalization") {
-                    normalizationStrength = 1
+                    normalizationStrength = Double(NormalizationSettings.defaultStrength)
                 }
                 .buttonStyle(.borderless)
             } header: {
                 Text("Audio Normalization")
             } footer: {
-                Text("Runs after microphone EQ and controls how strongly quiet and loud audio are leveled. 0% disables adaptive leveling; 100% uses full leveling. Rumble filtering and peak protection remain active. Applies to the next recording or audio import.")
+                Text("Runs after voice isolation and microphone EQ and controls how strongly quiet and loud audio are leveled. 0% disables adaptive leveling; 100% uses full leveling. Rumble filtering and peak protection remain active. Applies to the next recording or audio import.")
             }
 
             Section {
@@ -83,6 +115,17 @@ struct AudioSetupView: View {
                 microphoneSourceBeforePriorityOrder = currentMicrophoneSource
             }
         }
+    }
+
+    private var isolationStrengthBinding: Binding<Double> {
+        Binding(
+            get: { Double(VoiceIsolationSettings.validatedStrength(Float(isolationStrength))) },
+            set: { isolationStrength = $0 }
+        )
+    }
+
+    private var isolationStrengthLabel: String {
+        isolationStrengthBinding.wrappedValue.formatted(.percent.precision(.fractionLength(0)))
     }
 
     private var normalizationStrengthBinding: Binding<Double> {

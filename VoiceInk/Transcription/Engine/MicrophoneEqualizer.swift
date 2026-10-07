@@ -150,67 +150,15 @@ private struct BiquadFilter {
 }
 
 extension AudioProcessor {
+    /// For raw files only. CoreAudioRecorder already processes its recordings live.
     func processMicrophoneRecording(
         at url: URL,
         settings: MicrophoneEqualizerSettings,
-        strength: Float = NormalizationSettings.loadStrength()
+        strength: Float = NormalizationSettings.loadStrength(),
+        isolationStrength: Float = VoiceIsolationSettings.loadStrength(),
+        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode()
     ) throws {
-        guard settings.isEnabled else {
-            try normalizeAudioFile(at: url, strength: strength)
-            return
-        }
-
-        let temporaryURL = url.deletingLastPathComponent()
-            .appendingPathComponent(".\(url.lastPathComponent).equalizing-\(UUID().uuidString).wav")
-        defer { try? FileManager.default.removeItem(at: temporaryURL) }
-
-        try writeEqualizedAudio(
-            from: url,
-            to: temporaryURL,
-            settings: settings,
-            gain: 1
-        )
-        _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
-        try normalizeAudioFile(at: url, strength: strength)
-    }
-
-    private func writeEqualizedAudio(
-        from sourceURL: URL,
-        to destinationURL: URL,
-        settings: MicrophoneEqualizerSettings,
-        gain: Float
-    ) throws {
-        let sourceFile = try AVAudioFile(forReading: sourceURL)
-        let format = sourceFile.processingFormat
-        let outputFile = try AVAudioFile(
-            forWriting: destinationURL,
-            settings: sourceFile.fileFormat.settings,
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved
-        )
-        let chunkSize: AVAudioFrameCount = 65_536
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
-            throw AudioProcessingError.conversionFailed
-        }
-        var equalizer = MicrophoneEqualizer(
-            settings: settings,
-            sampleRate: format.sampleRate,
-            channelCount: Int(format.channelCount)
-        )
-
-        while sourceFile.framePosition < sourceFile.length {
-            try sourceFile.read(into: buffer, frameCount: chunkSize)
-            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
-                throw AudioProcessingError.sampleExtractionFailed
-            }
-
-            for channel in 0..<Int(format.channelCount) {
-                equalizer.process(channels[channel], count: Int(buffer.frameLength), channel: channel)
-                for frame in 0..<Int(buffer.frameLength) {
-                    channels[channel][frame] *= gain
-                }
-            }
-            try outputFile.write(from: buffer)
-        }
+        try normalizeAudioFile(at: url, strength: strength, isolationStrength: isolationStrength,
+            blendMode: blendMode, equalizerSettings: settings)
     }
 }

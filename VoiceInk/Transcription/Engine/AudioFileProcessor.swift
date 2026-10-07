@@ -36,7 +36,9 @@ class AudioProcessor {
 
     func processAudioToSamples(
         _ url: URL,
-        strength: Float = NormalizationSettings.loadStrength()
+        strength: Float = NormalizationSettings.loadStrength(),
+        isolationStrength: Float = VoiceIsolationSettings.loadStrength(),
+        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode()
     ) async throws -> [Float] {
         let samples: [Float]
         do {
@@ -53,138 +55,137 @@ class AudioProcessor {
             samples = try await readUsingAssetReader(url)
         }
 
-        var normalizedSamples = samples
-        SpeechAudioNormalizer.normalize(
-            &normalizedSamples,
-            sampleRate: AudioFormat.targetSampleRate,
-            strength: strength
+        let pipeline = try SpeechProcessingPipeline(
+            sampleRate: 48_000,
+            outputSampleRate: AudioFormat.targetSampleRate,
+            normalizationStrength: strength,
+            isolationStrength: isolationStrength,
+            blendMode: blendMode
         )
-        return normalizedSamples
+        var processed: [Float] = []
+        // Keep processing bounded and allow cancellation between chunks.
+        var offset = 0
+        while offset < samples.count {
+            try Task.checkCancellation()
+            let count = min(65_536, samples.count - offset)
+            samples.withUnsafeBufferPointer {
+                processed.append(contentsOf: pipeline.process($0.baseAddress! + offset, count: count))
+            }
+            offset += count
+        }
+        processed.append(contentsOf: pipeline.finish())
+        return processed
     }
 
-    /// Adaptively level a recording from recent speech loudness, sharing gain across
-    /// channels, then tame short transients.
+    /// Isolate, optionally EQ, then level each channel in one streaming pass.
     func normalizeAudioFile(
         at url: URL,
-        strength: Float = NormalizationSettings.loadStrength()
+        strength: Float = NormalizationSettings.loadStrength(),
+        isolationStrength: Float = VoiceIsolationSettings.loadStrength(),
+        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode(),
+        equalizerSettings: MicrophoneEqualizerSettings? = nil
     ) throws {
         let inputFile = try AVAudioFile(forReading: url)
         let format = inputFile.processingFormat
         let channelCount = Int(format.channelCount)
         let chunkSize: AVAudioFrameCount = 65_536
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize) else {
+        let outputCapacity = chunkSize + AVAudioFrameCount(ceil(format.sampleRate * 0.1)) + 64
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkSize),
+              let outputBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: outputCapacity) else {
             throw AudioProcessingError.conversionFailed
         }
-
+        let pipelines = try (0..<channelCount).map { _ in
+            try SpeechProcessingPipeline(sampleRate: format.sampleRate,
+                normalizationStrength: strength, isolationStrength: isolationStrength,
+                blendMode: blendMode, equalizerSettings: equalizerSettings,
+                applyNormalization: channelCount == 1)
+        }
+        var sharedLeveler = StreamingSpeechLeveler(sampleRate: format.sampleRate, strength: strength)
         let temporaryURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).normalizing-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
-
-        let outputFile = try AVAudioFile(
-            forWriting: temporaryURL,
-            settings: inputFile.fileFormat.settings,
-            commonFormat: format.commonFormat,
-            interleaved: format.isInterleaved
-        )
-        var leveler = StreamingSpeechLeveler(
-            sampleRate: format.sampleRate,
-            strength: strength
-        )
-
-        while inputFile.framePosition < inputFile.length {
-            try inputFile.read(into: buffer, frameCount: chunkSize)
-            guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
-                throw AudioProcessingError.sampleExtractionFailed
+        // Close the writer before replacing the original so its header is final.
+        do {
+            let outputFile = try AVAudioFile(
+                forWriting: temporaryURL, settings: inputFile.fileFormat.settings,
+                commonFormat: format.commonFormat, interleaved: format.isInterleaved)
+            func write(_ results: [[Float]]) throws {
+                guard let count = results.first?.count, count > 0 else { return }
+                guard count <= Int(outputCapacity), results.allSatisfy({ $0.count == count }),
+                      let channels = outputBuffer.floatChannelData else {
+                    throw AudioProcessingError.sampleExtractionFailed
+                }
+                outputBuffer.frameLength = AVAudioFrameCount(count)
+                for channel in 0..<channelCount {
+                    results[channel].withUnsafeBufferPointer {
+                        channels[channel].update(from: $0.baseAddress!, count: count)
+                    }
+                }
+                if channelCount > 1 {
+                    if isolationStrength > 0 {
+                        let probabilities = (0..<count).map { frame in
+                            pipelines.map { $0.outputSpeechProbabilities[frame] }.max() ?? 0
+                        }
+                        probabilities.withUnsafeBufferPointer {
+                            sharedLeveler.process(channels, channelCount: channelCount,
+                                frameCount: count, speechProbabilities: $0.baseAddress)
+                        }
+                    } else {
+                        sharedLeveler.process(channels, channelCount: channelCount, frameCount: count)
+                    }
+                }
+                try outputFile.write(from: outputBuffer)
             }
-
-            leveler.process(
-                channels,
-                channelCount: channelCount,
-                frameCount: Int(buffer.frameLength)
-            )
-            try outputFile.write(from: buffer)
+            while inputFile.framePosition < inputFile.length {
+                try inputFile.read(into: buffer, frameCount: chunkSize)
+                guard buffer.frameLength > 0, let channels = buffer.floatChannelData else {
+                    throw AudioProcessingError.sampleExtractionFailed
+                }
+                try write((0..<channelCount).map {
+                    pipelines[$0].process(channels[$0], count: Int(buffer.frameLength))
+                })
+            }
+            try write(pipelines.map { $0.finish() })
         }
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
     }
 
     private func readUsingAudioFile(_ url: URL) throws -> [Float] {
-        guard let audioFile = try? AVAudioFile(forReading: url) else {
-            throw AudioProcessingError.invalidAudioFile
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        guard let outputFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32,
+                  sampleRate: 48_000, channels: AudioFormat.targetChannels, interleaved: false),
+              let converter = AVAudioConverter(from: format, to: outputFormat),
+              let input = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 65_536),
+              let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: 65_536) else {
+            throw AudioProcessingError.conversionFailed
         }
-
-        let format = audioFile.processingFormat
-        let sampleRate = format.sampleRate
-        let channels = format.channelCount
-        let totalFrames = audioFile.length
-
-        let outputFormat = AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: AudioFormat.targetSampleRate,
-            channels: AudioFormat.targetChannels,
-            interleaved: false
-        )
-
-        guard let outputFormat = outputFormat else {
-            throw AudioProcessingError.unsupportedFormat
-        }
-
-        let chunkSize: AVAudioFrameCount = 50_000_000
-        var allSamples: [Float] = []
-        var currentFrame: AVAudioFramePosition = 0
-
-        while currentFrame < totalFrames {
-            let remainingFrames = totalFrames - currentFrame
-            let framesToRead = min(chunkSize, AVAudioFrameCount(remainingFrames))
-
-            guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: framesToRead) else {
-                throw AudioProcessingError.conversionFailed
+        var samples: [Float] = []
+        var readError: Error?
+        while true {
+            var conversionError: NSError?
+            let status = converter.convert(to: output, error: &conversionError) { requested, inputStatus in
+                guard readError == nil, file.framePosition < file.length else {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                do {
+                    try file.read(into: input, frameCount: min(requested, input.frameCapacity))
+                    inputStatus.pointee = input.frameLength > 0 ? .haveData : .endOfStream
+                    return input.frameLength > 0 ? input : nil
+                } catch {
+                    readError = error
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
             }
-
-            audioFile.framePosition = currentFrame
-            try audioFile.read(into: inputBuffer, frameCount: framesToRead)
-
-            if sampleRate == AudioFormat.targetSampleRate && channels == AudioFormat.targetChannels {
-                let chunkSamples = convertToWhisperFormat(inputBuffer)
-                allSamples.append(contentsOf: chunkSamples)
-            } else {
-                guard let converter = AVAudioConverter(from: format, to: outputFormat) else {
-                    throw AudioProcessingError.conversionFailed
-                }
-
-                let ratio = AudioFormat.targetSampleRate / sampleRate
-                let outputFrameCount = AVAudioFrameCount(Double(inputBuffer.frameLength) * ratio)
-
-                guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputFrameCount)
-                else {
-                    throw AudioProcessingError.conversionFailed
-                }
-
-                var error: NSError?
-                let status = converter.convert(
-                    to: outputBuffer,
-                    error: &error,
-                    withInputFrom: { inNumPackets, outStatus in
-                        outStatus.pointee = .haveData
-                        return inputBuffer
-                    }
-                )
-
-                if error != nil {
-                    throw AudioProcessingError.conversionFailed
-                }
-
-                if status == .error {
-                    throw AudioProcessingError.conversionFailed
-                }
-
-                let chunkSamples = convertToWhisperFormat(outputBuffer)
-                allSamples.append(contentsOf: chunkSamples)
-            }
-
-            currentFrame += AVAudioFramePosition(framesToRead)
+            if let readError { throw readError }
+            if let conversionError { throw conversionError }
+            guard status != .error else { throw AudioProcessingError.conversionFailed }
+            if output.frameLength > 0 { samples.append(contentsOf: convertToWhisperFormat(output)) }
+            if status == .endOfStream { break }
         }
-
-        return allSamples
+        return samples
     }
 
     private func readUsingAssetReader(_ url: URL) async throws -> [Float] {
@@ -198,7 +199,7 @@ class AudioProcessor {
         let reader = try AVAssetReader(asset: asset)
         let outputSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatLinearPCM,
-            AVSampleRateKey: AudioFormat.targetSampleRate,
+            AVSampleRateKey: 48_000.0,
             AVNumberOfChannelsKey: AudioFormat.targetChannels,
             AVLinearPCMBitDepthKey: 32,
             AVLinearPCMIsFloatKey: true,
@@ -274,7 +275,7 @@ class AudioProcessor {
 
         guard
             format.mFormatID == kAudioFormatLinearPCM,
-            abs(format.mSampleRate - AudioFormat.targetSampleRate) < 1.0,
+            abs(format.mSampleRate - 48_000.0) < 1.0,
             format.mChannelsPerFrame == AudioFormat.targetChannels,
             format.mBitsPerChannel == 32,
             isFloat,

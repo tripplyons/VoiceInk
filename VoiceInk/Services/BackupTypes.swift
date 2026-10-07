@@ -92,6 +92,9 @@ struct GeneralBackup: Codable {
     let clipboardRestoreDelay: Double?
     let spokenPhraseActions: [SpokenPhraseAction]?
     let microphoneEqualizerSettings: MicrophoneEqualizerSettings?
+    var voiceIsolationStrength: Float? = nil
+    var voiceIsolationBlendMode: String? = nil
+    var audioNormalizationStrength: Float? = nil
 }
 
 struct WordBackup: Codable {

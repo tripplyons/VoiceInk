@@ -16,18 +16,26 @@ enum SpeechAudioNormalizer {
 }
 
 /// Streaming audio leveling driven by fixed-size analysis frames and a short
-/// recent-level window. Every nonzero amplitude contributes to the gain estimate;
-/// there is no level gate or minimum/maximum gain policy.
+/// recent-level window. Without isolation, every nonzero amplitude contributes
+/// and gain remains unrestricted. RNNoise confidence selects analysis frames when
+/// supplied; the last speech gain is held across weak phonemes and short pauses.
 struct StreamingSpeechLeveler {
     private let strength: Float
     private let sampleRate: Double
     private let analysisFrameSize: Int
     private var analysisSampleCount = 0
     private var analysisSquareSum: Double = 0
+    private var analysisSpeechEvidence: Float = 0
+    private var hasAcquiredLevel = false
+    private var acquisitionSamplesRemaining = 0
+    private let acquisitionCoefficient: Float
 
     private var levelEstimator = RecentLevelEstimator()
     private var desiredGain: Float = 1
     private var appliedGain: Float = 1
+    private var speechConfidence: Float = 1
+    private var usesSpeechConfidence = false
+    private let confidenceReleaseCoefficient: Float
     private var rumbleFilters: [SpeechRumbleFilter]
     private var limiters: [SpeechTransientLimiter]
 
@@ -41,22 +49,37 @@ struct StreamingSpeechLeveler {
         let safeSampleRate = max(sampleRate, 1)
         self.sampleRate = safeSampleRate
         analysisFrameSize = max(1, Int(safeSampleRate * 0.02))
+        acquisitionCoefficient = Float(exp(-1 / (safeSampleRate * 0.003)))
         gainReductionCoefficient = Float(
             exp(-1 / (safeSampleRate * Self.gainReductionTimeConstant))
         )
         gainRecoveryCoefficient = Float(
             exp(-1 / (safeSampleRate * Self.gainRecoveryTimeConstant))
         )
+        confidenceReleaseCoefficient = Float(exp(-1 / (safeSampleRate * 0.25)))
         rumbleFilters = [SpeechRumbleFilter(sampleRate: safeSampleRate)]
         limiters = [SpeechTransientLimiter(sampleRate: safeSampleRate)]
     }
 
-    mutating func process(_ samples: UnsafeMutablePointer<Float>, count: Int) {
+    mutating func process(
+        _ samples: UnsafeMutablePointer<Float>, count: Int, speechProbability: Float? = nil
+    ) {
         guard count > 0 else { return }
 
+        if speechProbability != nil, !usesSpeechConfidence {
+            usesSpeechConfidence = true
+            speechConfidence = 0
+        }
+        let confidence = speechProbability.map {
+            $0.isFinite ? min(max(($0 - 0.2) / 0.6, 0), 1) : 0
+        }
         for index in 0..<count {
-            let sample = rumbleFilters[0].process(samples[index])
-            trackAnalysis(sampleSquare: Double(sample) * Double(sample))
+            if let confidence {
+                speechConfidence = max(confidence, speechConfidence * confidenceReleaseCoefficient)
+            }
+            let input = samples[index].isFinite ? samples[index] : 0
+            let sample = rumbleFilters[0].process(input)
+            trackAnalysis(sampleSquare: Double(sample) * Double(sample), speechEvidence: confidence ?? 1)
             updateAppliedGain()
             samples[index] = limiters[0].process(sample * appliedGain)
         }
@@ -67,20 +90,32 @@ struct StreamingSpeechLeveler {
     mutating func process(
         _ channels: UnsafePointer<UnsafeMutablePointer<Float>>,
         channelCount: Int,
-        frameCount: Int
+        frameCount: Int,
+        speechProbabilities: UnsafePointer<Float>? = nil
     ) {
         guard channelCount > 0, frameCount > 0 else { return }
         ensureLimiterCount(channelCount)
 
+        if speechProbabilities != nil, !usesSpeechConfidence {
+            usesSpeechConfidence = true
+            speechConfidence = 0
+        }
         for frame in 0..<frameCount {
+            var frameEvidence: Float = 1
+            if let speechProbabilities {
+                let probability = speechProbabilities[frame]
+                frameEvidence = probability.isFinite ? min(max((probability - 0.2) / 0.6, 0), 1) : 0
+                speechConfidence = max(frameEvidence, speechConfidence * confidenceReleaseCoefficient)
+            }
             var squareSum: Double = 0
             for channel in 0..<channelCount {
-                let sample = rumbleFilters[channel].process(channels[channel][frame])
+                let input = channels[channel][frame].isFinite ? channels[channel][frame] : 0
+                let sample = rumbleFilters[channel].process(input)
                 channels[channel][frame] = sample
                 squareSum += Double(sample) * Double(sample)
             }
 
-            trackAnalysis(sampleSquare: squareSum / Double(channelCount))
+            trackAnalysis(sampleSquare: squareSum / Double(channelCount), speechEvidence: frameEvidence)
             updateAppliedGain()
 
             for channel in 0..<channelCount {
@@ -97,21 +132,28 @@ struct StreamingSpeechLeveler {
         }
     }
 
-    private mutating func trackAnalysis(sampleSquare: Double) {
+    private mutating func trackAnalysis(sampleSquare: Double, speechEvidence: Float) {
         analysisSampleCount += 1
         analysisSquareSum += sampleSquare
+        analysisSpeechEvidence += speechEvidence
 
         if analysisSampleCount == analysisFrameSize {
             updateEffectiveLevel()
             analysisSampleCount = 0
             analysisSquareSum = 0
+            analysisSpeechEvidence = 0
         }
     }
 
     private mutating func updateAppliedGain() {
-        let coefficient = desiredGain < appliedGain
-            ? gainReductionCoefficient
-            : gainRecoveryCoefficient
+        let coefficient: Float
+        if acquisitionSamplesRemaining > 0 {
+            coefficient = acquisitionCoefficient
+            acquisitionSamplesRemaining -= 1
+        } else {
+            coefficient = desiredGain < appliedGain
+                ? gainReductionCoefficient : gainRecoveryCoefficient
+        }
         appliedGain = coefficient * appliedGain + (1 - coefficient) * desiredGain
     }
 
@@ -134,19 +176,43 @@ struct StreamingSpeechLeveler {
             return
         }
 
+        if usesSpeechConfidence {
+            let evidence = analysisSpeechEvidence / Float(analysisSampleCount)
+            if evidence <= 0.2 {
+                // Do not learn the room's noise floor as a new quiet speech level.
+                // Hold the last speech gain through weak consonants and short gaps.
+                if speechConfidence <= 0.2 { resetToNeutral() }
+                return
+            }
+        }
+
         let effectiveRMS = levelEstimator.update(with: rms)
         let gain = SpeechAudioNormalizer.gain(forMeasuredRMS: effectiveRMS)
         guard gain.isFinite else {
             resetToNeutral()
             return
         }
-        // Scale the correction in decibels, not the target loudness.
-        desiredGain = strength == 0 ? 1 : pow(gain, strength)
+        // Learn both level and confidence only on supported speech frames.
+        // Keep that correction through weak phonemes instead of recomputing a
+        // smaller correction every time confidence drops. Low-confidence frames
+        // never turn a noise-floor estimate into a new, stronger speech boost.
+        let correctionStrength = gain > 1 && usesSpeechConfidence
+            ? strength * speechConfidence : strength
+        desiredGain = correctionStrength == 0 ? 1 : pow(gain, correctionStrength)
+        if !hasAcquiredLevel {
+            // Bootstrap from the first fixed analysis frame with a fast, smooth
+            // acquisition ramp. Avoid both a weak opening syllable and a sudden
+            // one-sample gain jump. No fixed boost or amplitude gate is imposed.
+            acquisitionSamplesRemaining = analysisFrameSize
+            hasAcquiredLevel = true
+        }
     }
 
     private mutating func resetToNeutral() {
         levelEstimator.reset()
         desiredGain = 1
+        hasAcquiredLevel = false
+        acquisitionSamplesRemaining = 0
     }
 }
 

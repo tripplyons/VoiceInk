@@ -191,6 +191,17 @@ enum BackupImporter {
             MicrophoneEqualizerSettingsStore.shared.replace(with: equalizerSettings)
         }
 
+        if let strength = general.voiceIsolationStrength {
+            UserDefaults.standard.set(VoiceIsolationSettings.validatedStrength(strength), forKey: VoiceIsolationSettings.strengthKey)
+        }
+        if let rawMode = general.voiceIsolationBlendMode,
+           let mode = VoiceIsolationSettings.BlendMode(rawValue: rawMode) {
+            UserDefaults.standard.set(mode.rawValue, forKey: VoiceIsolationSettings.blendModeKey)
+        }
+        if let strength = general.audioNormalizationStrength {
+            UserDefaults.standard.set(NormalizationSettings.validatedStrength(strength), forKey: NormalizationSettings.strengthKey)
+        }
+
         print("Successfully imported general settings.")
     }
 

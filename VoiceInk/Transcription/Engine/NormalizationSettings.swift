@@ -3,7 +3,8 @@ import Foundation
 /// Persisted at the app boundary and snapshotted once per recording or import.
 enum NormalizationSettings {
     static let strengthKey = "audioNormalizationStrength"
-    static let defaultStrength: Float = 0.5
+    // Quiet microphone speech needs the full adaptive correction by default.
+    static let defaultStrength: Float = 1
 
     static func validatedStrength(_ strength: Float) -> Float {
         guard strength.isFinite else { return defaultStrength }

@@ -176,7 +176,10 @@ class ImportExportService {
             restoreClipboardAfterPaste: UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste"),
             clipboardRestoreDelay: UserDefaults.standard.double(forKey: "clipboardRestoreDelay"),
             spokenPhraseActions: SpokenPhraseActionStore.shared.actions,
-            microphoneEqualizerSettings: MicrophoneEqualizerSettingsStore.shared.settings
+            microphoneEqualizerSettings: MicrophoneEqualizerSettingsStore.shared.settings,
+            voiceIsolationStrength: VoiceIsolationSettings.loadStrength(),
+            voiceIsolationBlendMode: VoiceIsolationSettings.loadBlendMode().rawValue,
+            audioNormalizationStrength: NormalizationSettings.loadStrength()
         )
 
         let exportedSettings = BackupFile(
