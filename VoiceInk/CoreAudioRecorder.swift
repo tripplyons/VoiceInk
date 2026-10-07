@@ -78,6 +78,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
     private var liveSpeechPipeline: SpeechProcessingPipeline?
     private var recordingEqualizerSettings = MicrophoneEqualizerSettings()
     private var recordingNormalizationStrength: Float = 0
+    private var recordingNormalizationTiming = NormalizationSettings.Timing()
     private var recordingIsolationStrength: Float = 0
     private var recordingBlendMode: VoiceIsolationSettings.BlendMode = .linear
 
@@ -193,6 +194,7 @@ final class CoreAudioRecorder: @unchecked Sendable {
             resetAudioProcessingState()
             recordingEqualizerSettings = equalizerSettings
             recordingNormalizationStrength = NormalizationSettings.loadStrength()
+            recordingNormalizationTiming = NormalizationSettings.loadTiming()
             recordingIsolationStrength = VoiceIsolationSettings.loadStrength()
             recordingBlendMode = VoiceIsolationSettings.loadBlendMode()
             liveSpeechPipeline = try makeSpeechPipeline(sampleRate: deviceFormat.mSampleRate)
@@ -1060,7 +1062,8 @@ final class CoreAudioRecorder: @unchecked Sendable {
             normalizationStrength: recordingNormalizationStrength,
             isolationStrength: recordingIsolationStrength,
             blendMode: recordingBlendMode,
-            equalizerSettings: recordingEqualizerSettings
+            equalizerSettings: recordingEqualizerSettings,
+            normalizationTiming: recordingNormalizationTiming
         )
     }
 

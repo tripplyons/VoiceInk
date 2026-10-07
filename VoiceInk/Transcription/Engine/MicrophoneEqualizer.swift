@@ -156,9 +156,10 @@ extension AudioProcessor {
         settings: MicrophoneEqualizerSettings,
         strength: Float = NormalizationSettings.loadStrength(),
         isolationStrength: Float = VoiceIsolationSettings.loadStrength(),
-        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode()
+        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode(),
+        normalizationTiming: NormalizationSettings.Timing = NormalizationSettings.loadTiming()
     ) throws {
         try normalizeAudioFile(at: url, strength: strength, isolationStrength: isolationStrength,
-            blendMode: blendMode, equalizerSettings: settings)
+            blendMode: blendMode, equalizerSettings: settings, normalizationTiming: normalizationTiming)
     }
 }

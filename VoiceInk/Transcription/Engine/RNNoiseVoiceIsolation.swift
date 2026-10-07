@@ -11,6 +11,7 @@ final class RNNoiseVoiceIsolation {
     private let state: OpaquePointer
     private let strength: Float
     private let blendMode: VoiceIsolationSettings.BlendMode
+    private var detailPreserver: BreathySpeechPreserver
     private var input = [Float](repeating: 0, count: frameSize)
     private var output = [Float](repeating: 0, count: frameSize)
     private var dry = [[Float]](repeating: [Float](repeating: 0, count: frameSize), count: delayFrames)
@@ -23,6 +24,7 @@ final class RNNoiseVoiceIsolation {
     init(strength: Float, blendMode: VoiceIsolationSettings.BlendMode = .linear) throws {
         self.blendMode = blendMode
         self.strength = VoiceIsolationSettings.validatedStrength(strength)
+        detailPreserver = BreathySpeechPreserver(sampleRate: Self.sampleRate, isolationStrength: strength)
         guard let state = rnnoise_create(nil) else { throw IsolationError.initializationFailed }
         self.state = state
         precondition(Int(rnnoise_get_frame_size()) == Self.frameSize)
@@ -62,7 +64,9 @@ final class RNNoiseVoiceIsolation {
         for index in 0..<Self.frameSize {
             let original = dry[slot][index] / 32768
             let isolated = output[index] / 32768
-            output[index] = blendMode.mix(original: original, isolated: isolated, strength: strength)
+            let blended = blendMode.mix(original: original, isolated: isolated, strength: strength)
+            output[index] = detailPreserver.process(original: original, isolated: isolated,
+                blended: blended, speechProbability: probability)
             dry[slot][index] = input[index]
         }
         if count > 0 {

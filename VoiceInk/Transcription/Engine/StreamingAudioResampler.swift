@@ -34,13 +34,16 @@ final class StreamingAudioResampler {
 
     func process(_ samples: UnsafePointer<Float>, count: Int, emit: (Float) -> Void) {
         guard !finished, count > 0 else { return }
-        for index in 0..<count {
-            history[received % history.count] = samples[index].isFinite ? samples[index] : 0
-            received += 1
-            while Double(emitted) * step + Double(Self.radius) < Double(received) {
-                emit(interpolatedSample())
-                emitted += 1
-            }
+        for index in 0..<count { process(samples[index], emit: emit) }
+    }
+
+    func process(_ sample: Float, emit: (Float) -> Void) {
+        guard !finished else { return }
+        history[received % history.count] = sample.isFinite ? sample : 0
+        received += 1
+        while Double(emitted) * step + Double(Self.radius) < Double(received) {
+            emit(interpolatedSample())
+            emitted += 1
         }
     }
 

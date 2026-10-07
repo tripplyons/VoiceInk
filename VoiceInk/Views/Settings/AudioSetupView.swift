@@ -11,6 +11,8 @@ struct AudioSetupView: View {
     @AppStorage(VoiceIsolationSettings.strengthKey) private var isolationStrength = Double(
         VoiceIsolationSettings.defaultStrength)
     @AppStorage(VoiceIsolationSettings.blendModeKey) private var isolationBlendMode = VoiceIsolationSettings.BlendMode.linear.rawValue
+    @AppStorage(NormalizationSettings.lookaheadKey) private var lookaheadMilliseconds = NormalizationSettings.defaultLookaheadMilliseconds
+    @AppStorage(NormalizationSettings.startupRampKey) private var startupRampMilliseconds = NormalizationSettings.defaultStartupRampMilliseconds
     @State private var refreshIconRotation = 0.0
 
     var body: some View {
@@ -55,7 +57,7 @@ struct AudioSetupView: View {
             } header: {
                 Text("Voice Isolation (RNNoise)")
             } footer: {
-                Text("Removes background noise locally before EQ and normalization. 0% bypasses isolation; 100% uses the denoised signal. Linear blends evenly. Equal-power can sound louder near the midpoint. Applies to the next recording or audio import. Does not separate overlapping speakers.")
+                Text("Removes background noise locally before EQ and normalization. 0% bypasses isolation; 100% uses the denoised signal. Linear blends evenly. Equal-power can sound louder near the midpoint. Partial isolation retains some breathy consonant detail near speech. Applies to the next recording or audio import. Does not separate overlapping speakers.")
             }
 
             Section {
@@ -78,14 +80,20 @@ struct AudioSetupView: View {
                         .foregroundStyle(.secondary)
                         .frame(width: 64, alignment: .trailing)
                 }
+                normalizationTimingRow("Lookahead", value: lookaheadBinding,
+                    range: NormalizationSettings.lookaheadRange, step: 5)
+                normalizationTimingRow("Startup ramp", value: startupRampBinding,
+                    range: NormalizationSettings.startupRampRange, step: 1)
                 Button("Reset Normalization") {
                     normalizationStrength = Double(NormalizationSettings.defaultStrength)
+                    lookaheadMilliseconds = NormalizationSettings.defaultLookaheadMilliseconds
+                    startupRampMilliseconds = NormalizationSettings.defaultStartupRampMilliseconds
                 }
                 .buttonStyle(.borderless)
             } header: {
                 Text("Audio Normalization")
             } footer: {
-                Text("Runs after voice isolation and microphone EQ and controls how strongly quiet and loud audio are leveled. 0% disables adaptive leveling; 100% uses full leveling. Rumble filtering and peak protection remain active. Applies to the next recording or audio import.")
+                Text("Runs after voice isolation and microphone EQ and controls how strongly quiet and loud audio are leveled. 0% disables adaptive leveling; 100% uses full leveling. Lookahead measures audio before applying gain and adds the selected delay. Startup ramp controls how smoothly the first correction reaches its target. Rumble filtering and peak protection remain active. Applies to the next recording or audio import.")
             }
 
             Section {
@@ -114,6 +122,30 @@ struct AudioSetupView: View {
             if !usesPriorityOrder {
                 microphoneSourceBeforePriorityOrder = currentMicrophoneSource
             }
+        }
+    }
+
+    private var lookaheadBinding: Binding<Double> {
+        Binding(get: { NormalizationSettings.Timing(lookaheadMilliseconds: lookaheadMilliseconds).lookaheadMilliseconds },
+                set: { lookaheadMilliseconds = $0 })
+    }
+
+    private var startupRampBinding: Binding<Double> {
+        Binding(get: { NormalizationSettings.Timing(startupRampMilliseconds: startupRampMilliseconds).startupRampMilliseconds },
+                set: { startupRampMilliseconds = $0 })
+    }
+
+    private func normalizationTimingRow(_ title: String, value: Binding<Double>,
+                                        range: ClosedRange<Double>, step: Double) -> some View {
+        HStack(spacing: 12) {
+            Text(title).frame(width: 105, alignment: .leading)
+            Slider(value: value, in: range, step: step)
+                .accessibilityLabel("Normalization \(title.lowercased())")
+                .accessibilityValue("\(Int(value.wrappedValue)) milliseconds")
+            Text("\(Int(value.wrappedValue)) ms")
+                .font(.body.monospacedDigit())
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .trailing)
         }
     }
 

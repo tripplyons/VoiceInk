@@ -202,6 +202,10 @@ enum BackupImporter {
             UserDefaults.standard.set(NormalizationSettings.validatedStrength(strength), forKey: NormalizationSettings.strengthKey)
         }
 
+        if let timing = general.audioNormalizationTiming {
+            NormalizationSettings.saveTiming(timing)
+        }
+
         print("Successfully imported general settings.")
     }
 

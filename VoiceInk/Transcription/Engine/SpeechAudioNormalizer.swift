@@ -4,9 +4,15 @@ import Foundation
 enum SpeechAudioNormalizer {
     static let targetRMS: Float = 0.1
 
-    static func normalize(_ samples: inout [Float], sampleRate: Double, strength: Float = 1) {
-        var leveler = StreamingSpeechLeveler(sampleRate: sampleRate, strength: strength)
-        leveler.process(&samples)
+    static func normalize(_ samples: inout [Float], sampleRate: Double, strength: Float = 1,
+                          timing: NormalizationSettings.Timing = .init()) {
+        let normalizer = LookaheadSpeechNormalizer(sampleRate: sampleRate, strength: strength, timing: timing)
+        var processed = samples.withUnsafeBufferPointer { buffer in
+            guard let samples = buffer.baseAddress else { return [Float]() }
+            return normalizer.process(samples, count: buffer.count)
+        }
+        processed.append(contentsOf: normalizer.finish()[0])
+        samples = processed
     }
 
     static func gain(forMeasuredRMS rms: Float) -> Float {
@@ -29,6 +35,7 @@ struct StreamingSpeechLeveler {
     private var hasAcquiredLevel = false
     private var acquisitionSamplesRemaining = 0
     private let acquisitionCoefficient: Float
+    private let startupRampSampleCount: Int
 
     private var levelEstimator = RecentLevelEstimator()
     private var desiredGain: Float = 1
@@ -44,12 +51,14 @@ struct StreamingSpeechLeveler {
     private let gainReductionCoefficient: Float
     private let gainRecoveryCoefficient: Float
 
-    init(sampleRate: Double, strength: Float = 1) {
+    init(sampleRate: Double, strength: Float = 1, timing: NormalizationSettings.Timing = .init()) {
         self.strength = NormalizationSettings.validatedStrength(strength)
         let safeSampleRate = max(sampleRate, 1)
         self.sampleRate = safeSampleRate
-        analysisFrameSize = max(1, Int(safeSampleRate * 0.02))
-        acquisitionCoefficient = Float(exp(-1 / (safeSampleRate * 0.003)))
+        analysisFrameSize = max(1, Int(safeSampleRate * timing.lookaheadSeconds))
+        startupRampSampleCount = max(1, Int(safeSampleRate * timing.startupRampSeconds))
+        // Reach about 99% of the target within the selected ramp duration.
+        acquisitionCoefficient = Float(exp(-5 / (safeSampleRate * timing.startupRampSeconds)))
         gainReductionCoefficient = Float(
             exp(-1 / (safeSampleRate * Self.gainReductionTimeConstant))
         )
@@ -121,6 +130,51 @@ struct StreamingSpeechLeveler {
             for channel in 0..<channelCount {
                 let sample = channels[channel][frame]
                 channels[channel][frame] = limiters[channel].process(sample * appliedGain)
+            }
+        }
+    }
+
+    /// The owning lookahead buffer provides at most one fixed analysis frame.
+    /// Measure and filter it once, then apply its correction from its first sample.
+    mutating func processLookaheadFrame(
+        _ channels: UnsafePointer<UnsafeMutablePointer<Float>>,
+        channelCount: Int,
+        frameCount: Int,
+        speechProbabilities: UnsafePointer<Float>? = nil
+    ) {
+        guard channelCount > 0, frameCount > 0 else { return }
+        precondition(frameCount <= analysisFrameSize && analysisSampleCount == 0)
+        ensureLimiterCount(channelCount)
+        if speechProbabilities != nil, !usesSpeechConfidence {
+            usesSpeechConfidence = true
+            speechConfidence = 0
+        }
+        for frame in 0..<frameCount {
+            var evidence: Float = 1
+            if let speechProbabilities {
+                let probability = speechProbabilities[frame]
+                evidence = probability.isFinite ? min(max((probability - 0.2) / 0.6, 0), 1) : 0
+                speechConfidence = max(evidence, speechConfidence * confidenceReleaseCoefficient)
+            }
+            var squareSum: Double = 0
+            for channel in 0..<channelCount {
+                let input = channels[channel][frame].isFinite ? channels[channel][frame] : 0
+                let filtered = rumbleFilters[channel].process(input)
+                channels[channel][frame] = filtered
+                squareSum += Double(filtered) * Double(filtered)
+            }
+            analysisSampleCount += 1
+            analysisSquareSum += squareSum / Double(channelCount)
+            analysisSpeechEvidence += evidence
+        }
+        updateEffectiveLevel()
+        analysisSampleCount = 0
+        analysisSquareSum = 0
+        analysisSpeechEvidence = 0
+        for frame in 0..<frameCount {
+            updateAppliedGain()
+            for channel in 0..<channelCount {
+                channels[channel][frame] = limiters[channel].process(channels[channel][frame] * appliedGain)
             }
         }
     }
@@ -203,7 +257,7 @@ struct StreamingSpeechLeveler {
             // Bootstrap from the first fixed analysis frame with a fast, smooth
             // acquisition ramp. Avoid both a weak opening syllable and a sudden
             // one-sample gain jump. No fixed boost or amplitude gate is imposed.
-            acquisitionSamplesRemaining = analysisFrameSize
+            acquisitionSamplesRemaining = startupRampSampleCount
             hasAcquiredLevel = true
         }
     }

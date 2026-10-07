@@ -10,7 +10,7 @@ final class SpeechProcessingPipeline {
     private let applyNormalization: Bool
     private(set) var outputSpeechProbabilities = [Float]()
     private var currentSpeechProbability: Float = 1
-    private var leveler: StreamingSpeechLeveler
+    private let normalizer: LookaheadSpeechNormalizer?
     private let outputRatio: Double
     private var received = 0
     private var emitted = 0
@@ -21,13 +21,18 @@ final class SpeechProcessingPipeline {
     init(sampleRate: Double, outputSampleRate: Double? = nil, normalizationStrength: Float, isolationStrength: Float,
          blendMode: VoiceIsolationSettings.BlendMode = .linear,
          equalizerSettings: MicrophoneEqualizerSettings? = nil,
-         applyNormalization: Bool = true) throws {
+         applyNormalization: Bool = true,
+         normalizationTiming: NormalizationSettings.Timing = .init(),
+         isolationFactory: (Float, VoiceIsolationSettings.BlendMode) throws -> RNNoiseVoiceIsolation = {
+             try RNNoiseVoiceIsolation(strength: $0, blendMode: $1)
+         }) throws {
         self.applyNormalization = applyNormalization
         let outputRate = outputSampleRate ?? sampleRate
         outputRatio = outputRate / sampleRate
         let isolationStrength = VoiceIsolationSettings.validatedStrength(isolationStrength)
         let processingRate = isolationStrength > 0 ? RNNoiseVoiceIsolation.sampleRate : sampleRate
-        isolation = isolationStrength > 0 ? try RNNoiseVoiceIsolation(strength: isolationStrength, blendMode: blendMode) : nil
+        // Zero bypasses model allocation and inference, not merely the wet mix.
+        isolation = isolationStrength > 0 ? try isolationFactory(isolationStrength, blendMode) : nil
         inputResampler = isolationStrength > 0 && sampleRate != processingRate
             ? StreamingAudioResampler(inputRate: sampleRate, outputRate: processingRate) : nil
         outputResampler = outputRate != processingRate
@@ -35,7 +40,9 @@ final class SpeechProcessingPipeline {
         equalizer = equalizerSettings.flatMap { settings in
             settings.isEnabled ? MicrophoneEqualizer(settings: settings, sampleRate: processingRate, channelCount: 1) : nil
         }
-        leveler = StreamingSpeechLeveler(sampleRate: processingRate, strength: normalizationStrength)
+        normalizer = applyNormalization
+            ? LookaheadSpeechNormalizer(sampleRate: processingRate, strength: normalizationStrength,
+                timing: normalizationTiming) : nil
         result.reserveCapacity(4096)
     }
 
@@ -74,6 +81,9 @@ final class SpeechProcessingPipeline {
             inputResampler?.finish { isolation.process($0, emit: self.processIsolatedFrame) }
             isolation.finish(emit: processIsolatedFrame)
         }
+        if let normalizer {
+            emitProcessed(normalizer.finish()[0], probabilities: normalizer.outputSpeechProbabilities)
+        }
         outputResampler?.finish(emit: appendOutput)
         return result
     }
@@ -87,16 +97,27 @@ final class SpeechProcessingPipeline {
         work.withUnsafeMutableBufferPointer { buffer in
             let samples = buffer.baseAddress!
             equalizer?.process(samples, count: count, channel: 0)
-            currentSpeechProbability = probability ?? 1
-            if applyNormalization {
-                leveler.process(samples, count: count, speechProbability: probability)
-            }
-            if let outputResampler {
-                outputResampler.process(samples, count: count, emit: appendOutput)
+            if let normalizer {
+                let processed = normalizer.process(samples, count: count, speechProbability: probability)
+                emitProcessed(processed, probabilities: normalizer.outputSpeechProbabilities)
             } else {
-                for index in 0..<count { appendOutput(samples[index]) }
+                currentSpeechProbability = probability ?? 1
+                for index in 0..<count { emitSample(samples[index]) }
             }
         }
+    }
+
+    private func emitProcessed(_ samples: [Float], probabilities: [Float]) {
+        precondition(samples.count == probabilities.count)
+        for index in samples.indices {
+            currentSpeechProbability = probabilities[index]
+            emitSample(samples[index])
+        }
+    }
+
+    private func emitSample(_ sample: Float) {
+        if let outputResampler { outputResampler.process(sample, emit: appendOutput) }
+        else { appendOutput(sample) }
     }
 
     private func appendOutput(_ sample: Float) {

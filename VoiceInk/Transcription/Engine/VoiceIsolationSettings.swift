@@ -33,7 +33,7 @@ enum VoiceIsolationSettings {
 
     static let strengthKey = "voiceIsolationStrength"
     // Preserve unvoiced whisper detail that full suppression can remove.
-    static let defaultStrength: Float = 0.35
+    static let defaultStrength: Float = 0
 
     static func validatedStrength(_ strength: Float) -> Float {
         guard strength.isFinite else { return defaultStrength }

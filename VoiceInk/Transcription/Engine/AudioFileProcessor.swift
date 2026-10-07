@@ -38,7 +38,8 @@ class AudioProcessor {
         _ url: URL,
         strength: Float = NormalizationSettings.loadStrength(),
         isolationStrength: Float = VoiceIsolationSettings.loadStrength(),
-        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode()
+        blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode(),
+        normalizationTiming: NormalizationSettings.Timing = NormalizationSettings.loadTiming()
     ) async throws -> [Float] {
         let samples: [Float]
         do {
@@ -60,7 +61,8 @@ class AudioProcessor {
             outputSampleRate: AudioFormat.targetSampleRate,
             normalizationStrength: strength,
             isolationStrength: isolationStrength,
-            blendMode: blendMode
+            blendMode: blendMode,
+            normalizationTiming: normalizationTiming
         )
         var processed: [Float] = []
         // Keep processing bounded and allow cancellation between chunks.
@@ -83,7 +85,8 @@ class AudioProcessor {
         strength: Float = NormalizationSettings.loadStrength(),
         isolationStrength: Float = VoiceIsolationSettings.loadStrength(),
         blendMode: VoiceIsolationSettings.BlendMode = VoiceIsolationSettings.loadBlendMode(),
-        equalizerSettings: MicrophoneEqualizerSettings? = nil
+        equalizerSettings: MicrophoneEqualizerSettings? = nil,
+        normalizationTiming: NormalizationSettings.Timing = NormalizationSettings.loadTiming()
     ) throws {
         let inputFile = try AVAudioFile(forReading: url)
         let format = inputFile.processingFormat
@@ -98,9 +101,11 @@ class AudioProcessor {
             try SpeechProcessingPipeline(sampleRate: format.sampleRate,
                 normalizationStrength: strength, isolationStrength: isolationStrength,
                 blendMode: blendMode, equalizerSettings: equalizerSettings,
-                applyNormalization: channelCount == 1)
+                applyNormalization: channelCount == 1, normalizationTiming: normalizationTiming)
         }
-        var sharedLeveler = StreamingSpeechLeveler(sampleRate: format.sampleRate, strength: strength)
+        let sharedNormalizer = channelCount > 1
+            ? LookaheadSpeechNormalizer(sampleRate: format.sampleRate, strength: strength,
+                channelCount: channelCount, timing: normalizationTiming) : nil
         let temporaryURL = url.deletingLastPathComponent()
             .appendingPathComponent(".\(url.lastPathComponent).normalizing-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: temporaryURL) }
@@ -121,20 +126,29 @@ class AudioProcessor {
                         channels[channel].update(from: $0.baseAddress!, count: count)
                     }
                 }
-                if channelCount > 1 {
+                if let sharedNormalizer {
+                    let normalized: [[Float]]
                     if isolationStrength > 0 {
                         let probabilities = (0..<count).map { frame in
                             pipelines.map { $0.outputSpeechProbabilities[frame] }.max() ?? 0
                         }
-                        probabilities.withUnsafeBufferPointer {
-                            sharedLeveler.process(channels, channelCount: channelCount,
-                                frameCount: count, speechProbabilities: $0.baseAddress)
+                        normalized = probabilities.withUnsafeBufferPointer {
+                            sharedNormalizer.process(channels, frameCount: count,
+                                speechProbabilities: $0.baseAddress)
                         }
                     } else {
-                        sharedLeveler.process(channels, channelCount: channelCount, frameCount: count)
+                        normalized = sharedNormalizer.process(channels, frameCount: count)
+                    }
+                    outputBuffer.frameLength = AVAudioFrameCount(normalized[0].count)
+                    for channel in 0..<channelCount {
+                        normalized[channel].withUnsafeBufferPointer { samples in
+                            if let source = samples.baseAddress {
+                                channels[channel].update(from: source, count: samples.count)
+                            }
+                        }
                     }
                 }
-                try outputFile.write(from: outputBuffer)
+                if outputBuffer.frameLength > 0 { try outputFile.write(from: outputBuffer) }
             }
             while inputFile.framePosition < inputFile.length {
                 try inputFile.read(into: buffer, frameCount: chunkSize)
@@ -146,6 +160,19 @@ class AudioProcessor {
                 })
             }
             try write(pipelines.map { $0.finish() })
+            if let sharedNormalizer {
+                let tail = sharedNormalizer.finish()
+                let count = tail[0].count
+                if count > 0, let channels = outputBuffer.floatChannelData {
+                    outputBuffer.frameLength = AVAudioFrameCount(count)
+                    for channel in 0..<channelCount {
+                        tail[channel].withUnsafeBufferPointer {
+                            channels[channel].update(from: $0.baseAddress!, count: count)
+                        }
+                    }
+                    try outputFile.write(from: outputBuffer)
+                }
+            }
         }
         _ = try FileManager.default.replaceItemAt(url, withItemAt: temporaryURL)
     }

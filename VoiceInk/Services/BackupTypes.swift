@@ -95,6 +95,7 @@ struct GeneralBackup: Codable {
     var voiceIsolationStrength: Float? = nil
     var voiceIsolationBlendMode: String? = nil
     var audioNormalizationStrength: Float? = nil
+    var audioNormalizationTiming: NormalizationSettings.Timing? = nil
 }
 
 struct WordBackup: Codable {

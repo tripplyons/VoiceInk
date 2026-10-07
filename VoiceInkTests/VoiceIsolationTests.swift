@@ -22,12 +22,14 @@ struct VoiceIsolationTests {
     }
 
     @Test func quietSpeechFactoryDefaultsDoNotOverrideSavedValues() throws {
-        #expect(abs(VoiceIsolationSettings.defaultStrength - 0.35) < 0.000001)
+        #expect(VoiceIsolationSettings.defaultStrength == 0)
         #expect(NormalizationSettings.defaultStrength == 1)
+        #expect(NormalizationSettings.Timing().lookaheadMilliseconds == 10)
+        #expect(NormalizationSettings.Timing().startupRampMilliseconds == 100)
         let suite = "QuietSpeechDefaults-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(NormalizationSettings.loadStrength(from: defaults) == 1)
+        #expect(NormalizationSettings.loadStrength(from: defaults) == NormalizationSettings.defaultStrength)
         defaults.set(0.6, forKey: NormalizationSettings.strengthKey)
         defaults.set(0.8, forKey: VoiceIsolationSettings.strengthKey)
         #expect(abs(NormalizationSettings.loadStrength(from: defaults) - 0.6) < 0.000001)
@@ -36,7 +38,114 @@ struct VoiceIsolationTests {
         #expect(mode == .linear)
         let blended = mode.mix(original: 0.01, isolated: 0,
             strength: VoiceIsolationSettings.defaultStrength)
-        #expect(abs(blended - 0.0065) < 0.000001)
+        #expect(abs(blended - 0.01) < 0.000001)
+    }
+
+    @Test func timingPersistsAndRejectsInvalidValues() throws {
+        let suite = "NormalizationTiming-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(NormalizationSettings.loadTiming(from: defaults) == .init())
+        let timing = NormalizationSettings.Timing(lookaheadMilliseconds: 45, startupRampMilliseconds: 30)
+        NormalizationSettings.saveTiming(timing, to: defaults)
+        #expect(NormalizationSettings.loadTiming(from: defaults) == timing)
+        let invalid = NormalizationSettings.Timing(lookaheadMilliseconds: .infinity, startupRampMilliseconds: .nan)
+        #expect(invalid == .init())
+        let bounded = NormalizationSettings.Timing(lookaheadMilliseconds: -10, startupRampMilliseconds: 500)
+        #expect(bounded.lookaheadMilliseconds == 5 && bounded.startupRampMilliseconds == 100)
+        let decoded = try JSONDecoder().decode(NormalizationSettings.Timing.self,
+            from: Data("{\"lookaheadMilliseconds\":-5,\"startupRampMilliseconds\":900}".utf8))
+        #expect(decoded.lookaheadMilliseconds == 5 && decoded.startupRampMilliseconds == 100)
+        #expect(try JSONDecoder().decode(NormalizationSettings.Timing.self, from: Data("{}".utf8)) == .init())
+        #expect(try JSONDecoder().decode(NormalizationSettings.Timing.self,
+            from: JSONEncoder().encode(timing)) == timing)
+    }
+
+    @Test func currentMicrophoneSettingsAreFactoryDefaults() {
+        let settings = MicrophoneEqualizerSettings()
+        #expect(settings.isEnabled)
+        #expect(settings.highPassFrequency == 300)
+        #expect(settings.lowPassFrequency == 7_900)
+        #expect(settings.bandGains.allSatisfy { $0 == 0 })
+    }
+
+    @Test func lookaheadMeasuresTheOpeningFrameBeforeEmittingIt() {
+        let source = (0..<320).map { Float(sin(Double($0) * 0.0864)) * 0.0005 }
+        let normalizer = LookaheadSpeechNormalizer(sampleRate: 16_000, strength: 1,
+            timing: .init(lookaheadMilliseconds: 20, startupRampMilliseconds: 15))
+        var output: [Float] = []
+        source.withUnsafeBufferPointer {
+            #expect(normalizer.process($0.baseAddress!, count: 319).isEmpty)
+            output = normalizer.process($0.baseAddress! + 319, count: 1)
+        }
+        #expect(output.count == 320)
+        #expect(rms(output) > 0.075 && rms(output) < 0.115)
+        #expect(normalizer.finish()[0].isEmpty)
+    }
+
+    @Test func lookaheadTimingAndStartupRampChangeTheResponse() {
+        let source = (0..<4_000).map { Float(sin(Double($0) * 0.0864)) * 0.0005 }
+        var levels: [Float] = []
+        for ramp in [1.0, 100] {
+            let normalizer = LookaheadSpeechNormalizer(sampleRate: 16_000, strength: 1,
+                timing: .init(lookaheadMilliseconds: 20, startupRampMilliseconds: ramp))
+            var output = source.withUnsafeBufferPointer { normalizer.process($0.baseAddress!, count: $0.count) }
+            output += normalizer.finish()[0]
+            #expect(output.count == source.count)
+            levels.append(rms(output.prefix(320)))
+        }
+        #expect(levels[0] > levels[1] * 2)
+        for milliseconds in [5.0, 45, 100] {
+            let normalizer = LookaheadSpeechNormalizer(sampleRate: 16_000, strength: 1,
+                timing: .init(lookaheadMilliseconds: milliseconds))
+            let size = Int(milliseconds * 16)
+            source.withUnsafeBufferPointer {
+                #expect(normalizer.process($0.baseAddress!, count: size - 1).isEmpty)
+                #expect(normalizer.process($0.baseAddress! + size - 1, count: 1).count == size)
+            }
+        }
+    }
+
+    @Test func configurableLookaheadPreservesTailAndChunkIndependence() throws {
+        let source = (0..<4_017).map { Float(sin(Double($0) * 0.17)) * 0.02 }
+        for duration in [5.0, 20, 100] {
+            let timing = NormalizationSettings.Timing(lookaheadMilliseconds: duration, startupRampMilliseconds: 25)
+            let reference = try process(source, rate: 16_000, chunks: [source.count], timing: timing)
+            let varied = try process(source, rate: 16_000, chunks: [1, 13, 127, 911], timing: timing)
+            #expect(reference.count == source.count && varied.count == source.count)
+            #expect(zip(reference, varied).allSatisfy { abs($0 - $1) < 0.000001 })
+        }
+        for count in [0, 1, 159, 320, 321] {
+            let source = [Float](repeating: 0.001, count: count)
+            let output = try process(source, rate: 16_000, chunks: [127])
+            #expect(output.count == source.count)
+        }
+    }
+
+    @Test func breathDetailPreservationIsSpeechAwareAndBandLimited() {
+        func restored(frequency: Double, probability: Float, strength: Float = 0.45) -> (Float, Float) {
+            var preserver = BreathySpeechPreserver(sampleRate: 48_000, isolationStrength: strength)
+            var baseline: [Float] = []
+            var restored: [Float] = []
+            for index in 0..<24_000 {
+                let original = Float(sin(2 * Double.pi * frequency * Double(index) / 48_000)) * 0.01
+                let blended = (1 - strength) * original
+                baseline.append(blended)
+                restored.append(preserver.process(original: original, isolated: 0,
+                    blended: blended, speechProbability: probability))
+            }
+            return (rms(baseline.suffix(12_000)), rms(restored.suffix(12_000)))
+        }
+        let breath = restored(frequency: 6_000, probability: 1)
+        #expect(breath.1 > breath.0 * 1.2)
+        let rumble = restored(frequency: 200, probability: 1)
+        #expect(rumble.1 < rumble.0 * 1.01)
+        let hiss = restored(frequency: 6_000, probability: 0)
+        #expect(abs(hiss.1 - hiss.0) < 0.000001)
+        var bypass = BreathySpeechPreserver(sampleRate: 48_000, isolationStrength: 0)
+        var full = BreathySpeechPreserver(sampleRate: 48_000, isolationStrength: 1)
+        #expect(bypass.process(original: 0.2, isolated: 0.1, blended: 0.2, speechProbability: 1) == 0.2)
+        #expect(full.process(original: 0.2, isolated: 0.1, blended: 0.1, speechProbability: 1) == 0.1)
     }
 
     @Test func blendModesHaveExactEndpointsAndDifferentMidpoints() {
@@ -77,6 +186,23 @@ struct VoiceIsolationTests {
         }
     }
 
+    @Test func zeroIsolationNeverInitializesRNNoise() throws {
+        struct UnexpectedInitialization: Error {}
+        var initializations = 0
+        let pipeline = try SpeechProcessingPipeline(sampleRate: 44_100, outputSampleRate: 16_000,
+            normalizationStrength: 0.75, isolationStrength: 0,
+            isolationFactory: { _, _ in
+                initializations += 1
+                throw UnexpectedInitialization()
+            })
+        let source = [Float](repeating: 0.001, count: 4_410)
+        var output = source.withUnsafeBufferPointer { pipeline.process($0.baseAddress!, count: $0.count) }
+        output += pipeline.finish()
+        #expect(initializations == 0)
+        #expect(output.count == 1_600)
+        #expect(output.allSatisfy { $0.isFinite })
+    }
+
     @Test func bypassMatchesNormalizationOnly() throws {
         var source = (0..<8_003).map { Float(sin(Double($0) * 0.17)) * 0.03 }
         let output = try process(source, rate: 16_000, chunks: [127, 911], isolation: 0)
@@ -88,7 +214,8 @@ struct VoiceIsolationTests {
     @Test func normalizationAcquiresQuietSpeechFromTheFirstAnalysisFrame() {
         for amplitude: Float in [0.0005, 0.03] {
             var samples = (0..<1_280).map { Float(sin(Double($0) * 0.0864)) * amplitude }
-            var leveler = StreamingSpeechLeveler(sampleRate: 16_000)
+            var leveler = StreamingSpeechLeveler(sampleRate: 16_000,
+                timing: .init(lookaheadMilliseconds: 20, startupRampMilliseconds: 15))
             leveler.process(&samples)
             // The first 20 ms measure loudness. The following frame should already
             // be near target, rather than waiting through a 50 ms recovery ramp.
@@ -195,7 +322,7 @@ struct VoiceIsolationTests {
         try processor.saveSamplesAsWav(samples: source, to: url)
         for isolation: Float in [0, 1] {
             let output = try await processor.processAudioToSamples(url, strength: 1,
-                isolationStrength: isolation, blendMode: .equalPower)
+                isolationStrength: isolation, blendMode: .equalPower, normalizationTiming: .init())
             #expect(output.count == source.count)
             #expect(output.allSatisfy { $0.isFinite && abs($0) <= 0.95 })
         }
@@ -221,7 +348,7 @@ struct VoiceIsolationTests {
                 let file = try AVAudioFile(forWriting: url, settings: format.settings)
                 try file.write(from: buffer)
             }
-            try AudioProcessor().normalizeAudioFile(at: url, strength: 1, isolationStrength: isolation)
+            try AudioProcessor().normalizeAudioFile(at: url, strength: 1, isolationStrength: isolation, normalizationTiming: .init())
             let processed = try AVAudioFile(forReading: url)
             #expect(processed.length == Int64(frameCount))
             #expect(processed.processingFormat.channelCount == 2)
@@ -240,9 +367,9 @@ struct VoiceIsolationTests {
     }
 
     private func process(_ source: [Float], rate: Double, chunks: [Int], isolation: Float = 1,
-                         strength: Float = 1) throws -> [Float] {
+                         strength: Float = 1, timing: NormalizationSettings.Timing = .init()) throws -> [Float] {
         let pipeline = try SpeechProcessingPipeline(sampleRate: rate, normalizationStrength: strength,
-            isolationStrength: isolation)
+            isolationStrength: isolation, normalizationTiming: timing)
         var output: [Float] = []
         var offset = 0
         var index = 0

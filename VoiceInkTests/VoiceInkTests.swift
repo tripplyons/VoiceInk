@@ -301,7 +301,7 @@ struct VoiceInkTests {
         try processor.saveSamplesAsWav(samples: samples, to: url)
 
         // Pin the strength so the host app's saved setting cannot change the result.
-        try processor.processMicrophoneRecording(at: url, settings: settings, strength: 1, isolationStrength: 0)
+        try processor.processMicrophoneRecording(at: url, settings: settings, strength: 1, isolationStrength: 0, normalizationTiming: .init())
 
         let processedSamples = try readSamples(from: url)
         let speechRMS = rms(processedSamples.suffix(12_000))
@@ -355,7 +355,7 @@ struct VoiceInkTests {
         let processor = AudioProcessor()
         try processor.saveSamplesAsWav(samples: samples, to: url)
         // Pin the strength so the host app's saved setting cannot change the result.
-        try processor.normalizeAudioFile(at: url, strength: 1, isolationStrength: 0)
+        try processor.normalizeAudioFile(at: url, strength: 1, isolationStrength: 0, normalizationTiming: .init())
 
         let normalizedSamples = try readSamples(from: url)
         let speechRMS = rms(normalizedSamples.suffix(16_000))

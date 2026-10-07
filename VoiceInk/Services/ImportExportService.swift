@@ -179,7 +179,8 @@ class ImportExportService {
             microphoneEqualizerSettings: MicrophoneEqualizerSettingsStore.shared.settings,
             voiceIsolationStrength: VoiceIsolationSettings.loadStrength(),
             voiceIsolationBlendMode: VoiceIsolationSettings.loadBlendMode().rawValue,
-            audioNormalizationStrength: NormalizationSettings.loadStrength()
+            audioNormalizationStrength: NormalizationSettings.loadStrength(),
+            audioNormalizationTiming: NormalizationSettings.loadTiming()
         )
 
         let exportedSettings = BackupFile(
