@@ -20,7 +20,17 @@ struct OpenRouterProvider: CloudProvider {
                 accuracy: 0.97,
                 isMultilingual: true,
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .openRouter)
-            )
+            ),
+            CloudModel(
+                name: "x-ai/grok-stt-1.0",
+                displayName: "Grok STT 1.0",
+                description: "xAI's Grok speech-to-text model, billed through your OpenRouter account",
+                provider: .openRouter,
+                speed: 0.99,
+                accuracy: 0.98,
+                isMultilingual: true,
+                supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .openRouter)
+            ),
         ]
     }
 
@@ -70,22 +80,13 @@ enum OpenRouterTranscriptionClient {
             throw CloudTranscriptionError.missingAPIKey
         }
 
-        var payload: [String: Any] = [
-            "model": model,
-            "input_audio": [
-                "data": audioData.base64EncodedString(),
-                "format": audioFormat(for: fileName),
-            ],
-            "response_format": "json",
-            "temperature": 0,
-        ]
-        if let language, !language.isEmpty {
-            payload["language"] = language
-        }
-        if let phraseList = phraseListOptions(for: customVocabulary) {
-            payload["provider"] = ["options": ["azure": ["phraseList": phraseList]]]
-        }
-
+        let payload = requestPayload(
+            audioData: audioData,
+            fileName: fileName,
+            model: model,
+            language: language,
+            customVocabulary: customVocabulary
+        )
         guard let body = try? JSONSerialization.data(withJSONObject: payload) else {
             throw CloudTranscriptionError.dataEncodingError
         }
@@ -151,10 +152,45 @@ enum OpenRouterTranscriptionClient {
         }
     }
 
+    /// Sampling options such as temperature are left out so each routed provider
+    /// applies its own defaults.
+    static func requestPayload(
+        audioData: Data,
+        fileName: String,
+        model: String,
+        language: String?,
+        customVocabulary: [String]
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
+            "model": model,
+            "input_audio": [
+                "data": audioData.base64EncodedString(),
+                "format": audioFormat(for: fileName),
+            ],
+            "response_format": "json",
+        ]
+        if let language, !language.isEmpty {
+            payload["language"] = language
+        }
+        if let providerOptions = providerOptions(model: model, customVocabulary: customVocabulary) {
+            payload["provider"] = ["options": providerOptions]
+        }
+        return payload
+    }
+
     /// OpenRouter identifies the container by name, not by MIME type.
     static func audioFormat(for fileName: String) -> String {
         let fileExtension = (fileName as NSString).pathExtension.lowercased()
         return fileExtension.isEmpty ? "wav" : fileExtension
+    }
+
+    /// Only Microsoft's models route to Azure, which accepts a phrase list. OpenRouter can
+    /// reject options the routed provider does not support, so other models get none.
+    static func providerOptions(model: String, customVocabulary: [String]) -> [String: Any]? {
+        guard model.hasPrefix("microsoft/"),
+              let phraseList = phraseListOptions(for: customVocabulary)
+        else { return nil }
+        return ["azure": ["phraseList": phraseList]]
     }
 
     /// MAI-Transcribe 2 biases recognition toward a phrase list, which is where

@@ -17,6 +17,38 @@ struct OpenRouterTests {
         #expect(provider.providerKey == AIProvider.openRouter.rawValue)
     }
 
+    @Test @MainActor func grokSTTIsRegisteredAsAnOpenRouterCloudModel() throws {
+        let model = try #require(
+            TranscriptionModelRegistry.models.first { $0.name == "x-ai/grok-stt-1.0" } as? CloudModel
+        )
+        #expect(model.provider == .openRouter)
+        #expect(model.isMultilingualModel)
+        #expect(model.supportedLanguages["auto"] != nil)
+    }
+
+    @Test func phraseListIsSentOnlyToModelsRoutedToAzure() throws {
+        let options = try #require(
+            OpenRouterTranscriptionClient.providerOptions(model: "microsoft/mai-transcribe-2", customVocabulary: ["VoiceInk"])
+        )
+        let azure = try #require(options["azure"] as? [String: Any])
+        let phraseList = try #require(azure["phraseList"] as? [String: Any])
+        #expect(phraseList["phrases"] as? [String] == ["VoiceInk"])
+
+        #expect(OpenRouterTranscriptionClient.providerOptions(model: "microsoft/mai-transcribe-2", customVocabulary: []) == nil)
+        #expect(OpenRouterTranscriptionClient.providerOptions(model: "x-ai/grok-stt-1.0", customVocabulary: ["VoiceInk"]) == nil)
+    }
+
+    @Test func requestLeavesSamplingOptionsToTheRoutedProvider() {
+        let payload = OpenRouterTranscriptionClient.requestPayload(
+            audioData: Data([1, 2, 3]),
+            fileName: "recording.wav",
+            model: "x-ai/grok-stt-1.0",
+            language: nil,
+            customVocabulary: ["VoiceInk"]
+        )
+        #expect(Set(payload.keys) == ["model", "input_audio", "response_format"])
+    }
+
     @Test func environmentKeyIsUsedOnlyForProvidersThatDeclareOne() {
         let environment = ["OPENROUTER_API_KEY": "  sk-or-v1-from-environment  "]
         #expect(
@@ -69,9 +101,10 @@ struct OpenRouterTests {
         .enabled(
             if: ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"] != nil
                 && ProcessInfo.processInfo.environment["VOICEINK_OPENROUTER_AUDIO"] != nil
-        )
+        ),
+        arguments: ["microsoft/mai-transcribe-2", "x-ai/grok-stt-1.0"]
     )
-    func transcribesEnglishAudioThroughOpenRouter() async throws {
+    func transcribesEnglishAudioThroughOpenRouter(model: String) async throws {
         let apiKey = try #require(ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"])
         let audioPath = try #require(ProcessInfo.processInfo.environment["VOICEINK_OPENROUTER_AUDIO"])
         let audioURL = URL(fileURLWithPath: audioPath)
@@ -83,11 +116,11 @@ struct OpenRouterTests {
             audioData: try Data(contentsOf: audioURL),
             fileName: audioURL.lastPathComponent,
             apiKey: apiKey,
-            model: "microsoft/mai-transcribe-2",
+            model: model,
             language: "en",
             customVocabulary: []
         )
-        print("OpenRouter transcript: \(transcript)")
+        print("OpenRouter \(model) transcript: \(transcript)")
         #expect(transcript.lowercased().contains("quick brown fox"))
         #expect(transcript.lowercased().contains("lazy dog"))
     }

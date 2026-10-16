@@ -24,9 +24,9 @@ No Apple Developer account is needed. See [BUILDING.md](BUILDING.md) and
   [oruk/orukeet](https://huggingface.co/oruk/orukeet) covering 25 European languages, 705 MB.
 - **Cohere Transcribe 03-2026**, local, running on Apple silicon through FluidAudio. 2.1 GB,
   14 languages, batch only.
-- **OpenRouter**, cloud. Currently `microsoft/mai-transcribe-2`. The key is read from the
-  Keychain, or from `OPENROUTER_API_KEY` when the app inherits a shell environment. Your
-  custom dictionary is sent as a phrase list.
+- **OpenRouter**, cloud. Currently `microsoft/mai-transcribe-2` and `x-ai/grok-stt-1.0`. The
+  key is read from the Keychain, or from `OPENROUTER_API_KEY` when the app inherits a shell
+  environment. For MAI-Transcribe 2, your custom dictionary is sent as a phrase list.
 
 ## Audio input
 
