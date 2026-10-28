@@ -22,6 +22,16 @@ struct OpenRouterProvider: CloudProvider {
                 supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .openRouter)
             ),
             CloudModel(
+                name: "elevenlabs/scribe-v2",
+                displayName: "Scribe v2",
+                description: "ElevenLabs' speech-to-text model, billed through your OpenRouter account",
+                provider: .openRouter,
+                speed: 0.9,
+                accuracy: 0.98,
+                isMultilingual: true,
+                supportedLanguages: LanguageDictionary.forProvider(isMultilingual: true, provider: .openRouter)
+            ),
+            CloudModel(
                 name: "x-ai/grok-stt-1.0",
                 displayName: "Grok STT 1.0",
                 description: "xAI's Grok speech-to-text model, billed through your OpenRouter account",

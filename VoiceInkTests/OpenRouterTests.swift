@@ -26,6 +26,33 @@ struct OpenRouterTests {
         #expect(model.supportedLanguages["auto"] != nil)
     }
 
+    @Test @MainActor func scribeV2IsRegisteredAsAnOpenRouterCloudModel() throws {
+        let model = try #require(
+            TranscriptionModelRegistry.models.first { $0.name == "elevenlabs/scribe-v2" } as? CloudModel
+        )
+        #expect(model.provider == .openRouter)
+        #expect(model.displayName == "Scribe v2")
+        #expect(model.isMultilingualModel)
+        #expect(model.supportedLanguages["auto"] != nil)
+    }
+
+    @Test func scribeV2UsesTheSharedAudioPayloadWithoutAzureOptions() throws {
+        let audio = Data([1, 2, 3])
+        let payload = OpenRouterTranscriptionClient.requestPayload(
+            audioData: audio,
+            fileName: "recording.wav",
+            model: "elevenlabs/scribe-v2",
+            language: "en",
+            customVocabulary: ["VoiceInk"]
+        )
+        #expect(payload["model"] as? String == "elevenlabs/scribe-v2")
+        #expect(payload["language"] as? String == "en")
+        #expect(payload["response_format"] as? String == "json")
+        #expect(payload["provider"] == nil)
+        let input = try #require(payload["input_audio"] as? [String: String])
+        #expect(input == ["data": audio.base64EncodedString(), "format": "wav"])
+    }
+
     @Test func phraseListIsSentOnlyToModelsRoutedToAzure() throws {
         let options = try #require(
             OpenRouterTranscriptionClient.providerOptions(model: "microsoft/mai-transcribe-2", customVocabulary: ["VoiceInk"])
@@ -102,7 +129,7 @@ struct OpenRouterTests {
             if: ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"] != nil
                 && ProcessInfo.processInfo.environment["VOICEINK_OPENROUTER_AUDIO"] != nil
         ),
-        arguments: ["microsoft/mai-transcribe-2", "x-ai/grok-stt-1.0"]
+        arguments: ["microsoft/mai-transcribe-2", "x-ai/grok-stt-1.0", "elevenlabs/scribe-v2"]
     )
     func transcribesEnglishAudioThroughOpenRouter(model: String) async throws {
         let apiKey = try #require(ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"])
